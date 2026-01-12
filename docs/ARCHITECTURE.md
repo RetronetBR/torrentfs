@@ -1,0 +1,1 @@
+Daemon-centric architecture.
