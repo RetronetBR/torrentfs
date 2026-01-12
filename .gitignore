@@ -1,3 +1,5 @@
 .venv
 cache
 torrents
+__pycache__/
+*.pyc
