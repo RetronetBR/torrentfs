@@ -47,7 +47,8 @@ def main():
     # -----------------------------
     # status
     # -----------------------------
-    sub.add_parser("status")
+    p_status = sub.add_parser("status")
+    p_status.add_argument("--unit", choices=["bytes", "kb", "mb", "gb"], default="bytes")
 
     # -----------------------------
     # ls
@@ -96,6 +97,18 @@ def main():
                 args.socket,
                 {"cmd": "status", "torrent": torrent},
             )
+            if resp.get("ok") and args.unit != "bytes":
+                st = resp.get("status", {})
+                divisors = {
+                    "kb": 1024,
+                    "mb": 1024 * 1024,
+                    "gb": 1024 * 1024 * 1024,
+                }
+                d = divisors[args.unit]
+                st["downloaded"] = st.get("downloaded", 0) / d
+                st["uploaded"] = st.get("uploaded", 0) / d
+                st["download_rate"] = st.get("download_rate", 0) / d
+                st["upload_rate"] = st.get("upload_rate", 0) / d
             print(json.dumps(resp, indent=2))
 
         elif args.cmd == "ls":
