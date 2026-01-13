@@ -1,3 +1,7 @@
 # Local mounts/cache
 cache/
 mnt/
+
+# Python cache/venv
+__pycache__/
+.venv/
