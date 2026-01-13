@@ -161,6 +161,9 @@ class TorrentEngine:
 
         # Lock para proteger chamadas de prioridade / leitura
         self._lock = threading.RLock()
+        self._pinned_files: set[int] = set()
+        self._pinned_paths: set[str] = set()
+        self._pins_path = os.path.join(self.cache_dir, ".pinned.json")
 
         # Session
         self.ses = lt.session()
@@ -202,6 +205,8 @@ class TorrentEngine:
         for i, f in enumerate(self.info.files()):
             # f.path (string com caminho relativo dentro do torrent)
             self.index.add_file(f.path, i, f.size)
+
+        self._load_pins()
 
     # -----------------------------
     # Utilidades
@@ -325,6 +330,59 @@ class TorrentEngine:
                 raise IsADirectoryError(path)
             fi = int(st["file_index"])
             self.handle.file_priority(fi, 7)
+            self._pinned_files.add(fi)
+            self._pinned_paths.add(path)
+            self._save_pins()
+
+    def list_pins(self) -> List[dict]:
+        with self._lock:
+            items = []
+            for fi in sorted(self._pinned_files):
+                path = self.info.files().file_path(fi)
+                size = int(self.info.files().file_size(fi))
+                items.append(
+                    {
+                        "path": path,
+                        "file_name": os.path.basename(path),
+                        "torrent_name": self.info.name(),
+                        "size": size,
+                    }
+                )
+            return items
+
+    def _load_pins(self) -> None:
+        try:
+            with open(self._pins_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            return
+        except Exception:
+            return
+
+        paths = data.get("paths") if isinstance(data, dict) else data
+        if not isinstance(paths, list):
+            return
+
+        for path in paths:
+            if not isinstance(path, str):
+                continue
+            try:
+                st = self.index.stat(path)
+            except Exception:
+                continue
+            if st.get("type") != "file":
+                continue
+            fi = int(st["file_index"])
+            self._pinned_files.add(fi)
+            self._pinned_paths.add(path)
+            self.handle.file_priority(fi, 7)
+
+    def _save_pins(self) -> None:
+        data = {"paths": sorted(self._pinned_paths)}
+        tmp_path = f"{self._pins_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp_path, self._pins_path)
 
     def read(
         self,

@@ -95,6 +95,14 @@ class TorrentFSServer:
                         engine.pin(path)
                         await send_json(writer, {"id": req_id, "ok": True})
 
+                    elif cmd == "pinned":
+                        engine = self._get_engine_from_req(req)
+                        pins = engine.list_pins()
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "pins": pins},
+                        )
+
                     elif cmd == "read":
                         engine = self._get_engine_from_req(req)
 

@@ -70,6 +70,11 @@ def main():
     p_pin = sub.add_parser("pin")
     p_pin.add_argument("path")
 
+    # -----------------------------
+    # pinned
+    # -----------------------------
+    sub.add_parser("pinned", help="Listar arquivos pinados")
+
     args = ap.parse_args()
 
     async def run():
@@ -130,6 +135,13 @@ def main():
                     "torrent": torrent,
                     "path": args.path,
                 },
+            )
+            print(json.dumps(resp, indent=2))
+
+        elif args.cmd == "pinned":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "pinned", "torrent": torrent},
             )
             print(json.dumps(resp, indent=2))
 

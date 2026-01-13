@@ -59,6 +59,7 @@ class TorrentManager:
             {
                 "id": tid,
                 "name": eng.info.name(),
+                "torrent_name": os.path.basename(eng.torrent_path),
                 "cache": eng.cache_dir,
             }
             for tid, eng in items

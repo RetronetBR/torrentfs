@@ -59,3 +59,9 @@ Pin file:
 ```bash
 python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> pin <path>
 ```
+
+List pinned files:
+
+```bash
+python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> pinned
+```
