@@ -5,3 +5,6 @@ mnt/
 # Python cache/venv
 __pycache__/
 .venv/
+
+# Torrent files
+torrents/
