@@ -117,6 +117,25 @@ def _get_index() -> Any:
     return PathIndex()
 
 
+def _load_torrent_info(path: str, max_metadata: int) -> lt.torrent_info:
+    try:
+        return lt.torrent_info(
+            path,
+            {
+                "max_metadata_size": max_metadata,
+                "max_torrent_file_size": max_metadata,
+            },
+        )
+    except Exception as e:
+        if "metadata too large" not in str(e):
+            raise
+
+    # Fallback: carrega o .torrent manualmente e bdecode
+    with open(path, "rb") as f:
+        data = f.read()
+    return lt.torrent_info(lt.bdecode(data))
+
+
 # -----------------------------
 # Engine
 # -----------------------------
@@ -184,25 +203,6 @@ class TorrentEngine:
             # f.path (string com caminho relativo dentro do torrent)
             self.index.add_file(f.path, i, f.size)
 
-
-def _load_torrent_info(path: str, max_metadata: int) -> lt.torrent_info:
-    try:
-        return lt.torrent_info(
-            path,
-            {
-                "max_metadata_size": max_metadata,
-                "max_torrent_file_size": max_metadata,
-            },
-        )
-    except Exception as e:
-        if "metadata too large" not in str(e):
-            raise
-
-    # Fallback: carrega o .torrent manualmente e bdecode
-    with open(path, "rb") as f:
-        data = f.read()
-    return lt.torrent_info(lt.bdecode(data))
-
     # -----------------------------
     # Utilidades
     # -----------------------------
@@ -248,7 +248,6 @@ def _load_torrent_info(path: str, max_metadata: int) -> lt.torrent_info:
 
         return out
 
-
     def _prioritize_for_read(
         self,
         file_index: int,
@@ -263,7 +262,9 @@ def _load_torrent_info(path: str, max_metadata: int) -> lt.torrent_info:
         mapping = self._map_file(file_index, offset, size)
         needed_pieces = [p for (p, _, _) in mapping]
 
-        stream = (mode == "stream") or (mode == "auto" and self._is_media_path(self.info.files().file_path(file_index)))
+        stream = (mode == "stream") or (
+            mode == "auto" and self._is_media_path(self.info.files().file_path(file_index))
+        )
 
         # Sequential download ajuda muito vídeo/áudio
         if stream:
