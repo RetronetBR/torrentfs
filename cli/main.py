@@ -84,7 +84,7 @@ def main():
         # -----------------------------
         if args.cmd == "torrents":
             resp, _ = await rpc_call(args.socket, {"cmd": "torrents"})
-            print(json.dumps(resp, indent=2))
+            print(json.dumps(resp, indent=2, ensure_ascii=False))
             return
 
         # -----------------------------
@@ -109,7 +109,7 @@ def main():
                 st["uploaded"] = st.get("uploaded", 0) / d
                 st["download_rate"] = st.get("download_rate", 0) / d
                 st["upload_rate"] = st.get("upload_rate", 0) / d
-            print(json.dumps(resp, indent=2))
+            print(json.dumps(resp, indent=2, ensure_ascii=False))
 
         elif args.cmd == "ls":
             resp, _ = await rpc_call(
@@ -120,7 +120,7 @@ def main():
                     "path": args.path,
                 },
             )
-            print(json.dumps(resp, indent=2))
+            print(json.dumps(resp, indent=2, ensure_ascii=False))
 
         elif args.cmd == "cat":
             resp, data = await rpc_call(
@@ -136,7 +136,7 @@ def main():
                 want_bytes=True,
             )
             if not resp.get("ok"):
-                print(json.dumps(resp, indent=2))
+                print(json.dumps(resp, indent=2, ensure_ascii=False))
                 return
             os.write(1, data)
 
@@ -149,14 +149,14 @@ def main():
                     "path": args.path,
                 },
             )
-            print(json.dumps(resp, indent=2))
+            print(json.dumps(resp, indent=2, ensure_ascii=False))
 
         elif args.cmd == "pinned":
             resp, _ = await rpc_call(
                 args.socket,
                 {"cmd": "pinned", "torrent": torrent},
             )
-            print(json.dumps(resp, indent=2))
+            print(json.dumps(resp, indent=2, ensure_ascii=False))
 
     asyncio.run(run())
 

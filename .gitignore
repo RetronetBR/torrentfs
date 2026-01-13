@@ -1,5 +1,3 @@
-.venv
-cache
-torrents
-__pycache__/
-*.pyc
+# Local mounts/cache
+cache/
+mnt/
