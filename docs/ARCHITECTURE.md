@@ -8,7 +8,7 @@ interface. The CLI and (future) FUSE driver are thin clients.
 - watcher: monitors a directory for .torrent files and loads them.
 - rpc: JSON framing over Unix Domain Socket.
 - cli: testing tool for status/list/read/pin/pinned.
-- fuse: read-only filesystem client (placeholder).
+- fuse: read-only filesystem client chamando o daemon via RPC.
 
 ## Data flow
 

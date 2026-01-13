@@ -8,7 +8,7 @@
 
 ## v0.2
 
-- FUSE read-only driver
+- FUSE read-only driver (implementação inicial disponível; seguir refinando conforme testes)
 - Basic getattr/readdir/open/read mapping
 - Stream-friendly read path
 

@@ -65,3 +65,20 @@ List pinned files:
 ```bash
 python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> pinned
 ```
+
+## FUSE (read-only)
+
+Pré-requisitos: fuse/fuse3 instalado no sistema, usuário com permissão para montar e `fusepy` instalado (já em `requirements.txt`).
+
+Montar (modo foreground para debug):
+```bash
+python -m fuse.fs --socket /tmp/torrentfsd.sock --torrent <id|name> --mount /mnt/torrentfs --mode auto --foreground
+```
+
+Opções úteis:
+- `--allow-other`: permite que outros usuários leiam (requer `user_allow_other` em `/etc/fuse.conf`).
+- `--uid/--gid`: força UID/GID apresentados nos arquivos (default: do usuário que executa ou SUDO_UID/SUDO_GID).
+
+Desmontar:
+- Linux: `fusermount -u /mnt/torrentfs`
+- macOS/FreeBSD: `umount /mnt/torrentfs`

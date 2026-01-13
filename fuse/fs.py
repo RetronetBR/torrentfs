@@ -8,7 +8,7 @@ import os
 import stat
 import sys
 import time
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 from fuse.client import rpc_call_sync
 
@@ -55,6 +55,8 @@ def _error_from_resp(resp: dict) -> FuseOSError:
         return FuseOSError(errno.ENOTDIR)
     if err == "IsADirectory":
         return FuseOSError(errno.EISDIR)
+    if "Timeout" in err:
+        return FuseOSError(errno.EAGAIN)
     return FuseOSError(errno.EIO)
 
 
@@ -63,23 +65,59 @@ class TorrentFS(Operations):
     FUSE read-only mapeando operações para o RPC do daemon.
     """
 
-    def __init__(self, socket_path: str, torrent: str, read_mode: str = "auto"):
+    def __init__(self, socket_path: str, torrent: str, read_mode: str = "auto", timeout_s: float = 5.0):
         self.socket_path = socket_path
         self.torrent = torrent
         self.read_mode = read_mode
+        self.timeout_s = timeout_s
         self._start_time = time.time()
+        self._stat_cache: Dict[str, Dict] = {}
+        self._stat_ttl = 10.0  # segundos
 
     # ---------------
     # Helpers
     # ---------------
+    def _cache_get(self, path: str) -> Optional[Dict]:
+        item = self._stat_cache.get(path)
+        if not item:
+            return None
+        ts = item.get("_ts", 0)
+        if (time.time() - ts) > self._stat_ttl:
+            self._stat_cache.pop(path, None)
+            return None
+        return {k: v for k, v in item.items() if k != "_ts"}
+
+    def _cache_set(self, path: str, stat_obj: Dict) -> None:
+        data = dict(stat_obj)
+        data["_ts"] = time.time()
+        self._stat_cache[path] = data
+
+    def _make_child_path(self, parent: str, name: str) -> str:
+        parent = _clean_path(parent)
+        if not parent:
+            return name
+        return f"{parent}/{name}"
+
     def _stat(self, path: str) -> Dict:
+        if path in ("", "/"):
+            return {
+                "type": "dir",
+                "size": 0,
+            }
+
+        cached = self._cache_get(path)
+        if cached:
+            return cached
+
         resp, _ = rpc_call_sync(
             self.socket_path,
             {"cmd": "stat", "torrent": self.torrent, "path": _clean_path(path)},
         )
         if not resp.get("ok"):
             raise _error_from_resp(resp)
-        return resp["stat"]
+        st = resp["stat"]
+        self._cache_set(path, st)
+        return st
 
     def _list(self, path: str):
         resp, _ = rpc_call_sync(
@@ -88,7 +126,18 @@ class TorrentFS(Operations):
         )
         if not resp.get("ok"):
             raise _error_from_resp(resp)
-        return resp.get("entries", [])
+        entries = resp.get("entries", [])
+        # Preenche cache com resultados da listagem.
+        for e in entries:
+            child_path = self._make_child_path(path, e["name"])
+            if e["type"] == "dir":
+                self._cache_set(child_path, {"type": "dir", "size": 0})
+            else:
+                self._cache_set(
+                    child_path,
+                    {"type": "file", "size": int(e.get("size", 0))},
+                )
+        return entries
 
     def _read(self, path: str, offset: int, size: int):
         resp, data = rpc_call_sync(
@@ -100,6 +149,7 @@ class TorrentFS(Operations):
                 "offset": int(offset),
                 "size": int(size),
                 "mode": self.read_mode,
+                "timeout_s": self.timeout_s,
             },
             want_bytes=True,
         )
@@ -206,6 +256,12 @@ def main():
         help="Modo de leitura repassado ao daemon",
     )
     ap.add_argument(
+        "--timeout",
+        type=float,
+        default=5.0,
+        help="Timeout (segundos) para leitura de pieces; em caso de falta de peers retorna EAGAIN.",
+    )
+    ap.add_argument(
         "--foreground",
         action="store_true",
         help="Não daemonizar (útil para debug)",
@@ -216,11 +272,11 @@ def main():
     if not os.path.isdir(args.mount):
         raise SystemExit(f"Mountpoint inválido: {args.mount}")
 
-    fs = TorrentFS(args.socket, args.torrent, read_mode=args.mode)
+    fs = TorrentFS(args.socket, args.torrent, read_mode=args.mode, timeout_s=args.timeout)
     FUSE(
         fs,
         args.mount,
-        nothreads=True,
+        nothreads=False,  # permite processar múltiplas requisições em paralelo (mais responsivo p/ file managers)
         foreground=args.foreground,
         ro=True,
         allow_other=args.allow_other,
