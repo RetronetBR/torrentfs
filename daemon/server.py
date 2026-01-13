@@ -1,7 +1,6 @@
+# daemon/server.py
 import asyncio
 import os
-import signal
-from typing import Dict, Any
 
 from common.rpc import (
     recv_json,
@@ -9,13 +8,21 @@ from common.rpc import (
     send_bytes,
 )
 
-from .engine import TorrentEngine
+from .manager import TorrentManager
+
+MAX_READ_BYTES = 4 * 1024 * 1024
 
 
 class TorrentFSServer:
-    def __init__(self, socket_path: str, engine: TorrentEngine):
+    def __init__(self, socket_path: str, manager: TorrentManager):
         self.socket_path = socket_path
-        self.engine = engine
+        self.manager = manager
+
+    def _get_engine_from_req(self, req: dict):
+        torrent = req.get("torrent")
+        if not torrent:
+            raise ValueError("TorrentRequired")
+        return self.manager.get_engine(str(torrent))
 
     async def handle_client(
         self,
@@ -29,51 +36,88 @@ class TorrentFSServer:
                 cmd = req.get("cmd")
 
                 try:
+                    # -----------------------------
+                    # Meta / controle
+                    # -----------------------------
                     if cmd == "hello":
+                        # Mantém compatibilidade: retorna info do daemon + torrents disponíveis
                         resp = {
                             "id": req_id,
                             "ok": True,
-                            "name": self.engine.info.name(),
-                            "cache": self.engine.cache_dir,
+                            "name": "torrentfsd",
+                            "torrents": self.manager.list_torrents(),
                         }
                         await send_json(writer, resp)
 
+                    elif cmd == "torrents":
+                        await send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": True,
+                                "torrents": self.manager.list_torrents(),
+                            },
+                        )
+
+                    # -----------------------------
+                    # Operações por torrent (requer "torrent")
+                    # -----------------------------
                     elif cmd == "status":
+                        engine = self._get_engine_from_req(req)
                         resp = {
                             "id": req_id,
                             "ok": True,
-                            "status": self.engine.status(),
+                            "status": engine.status(),
                         }
                         await send_json(writer, resp)
 
                     elif cmd == "list":
+                        engine = self._get_engine_from_req(req)
                         path = req.get("path", "")
-                        entries = self.engine.list_dir(path)
+                        entries = engine.list_dir(path)
                         await send_json(
                             writer,
                             {"id": req_id, "ok": True, "entries": entries},
                         )
 
                     elif cmd == "stat":
+                        engine = self._get_engine_from_req(req)
                         path = req["path"]
-                        st = self.engine.stat(path)
+                        st = engine.stat(path)
                         await send_json(
                             writer,
                             {"id": req_id, "ok": True, "stat": st},
                         )
 
                     elif cmd == "pin":
+                        engine = self._get_engine_from_req(req)
                         path = req["path"]
-                        self.engine.pin(path)
+                        engine.pin(path)
                         await send_json(writer, {"id": req_id, "ok": True})
 
                     elif cmd == "read":
+                        engine = self._get_engine_from_req(req)
+
                         path = req["path"]
                         offset = int(req.get("offset", 0))
                         size = int(req.get("size", 0))
                         mode = req.get("mode", "auto")
 
-                        data = self.engine.read(path, offset, size, mode=mode)
+                        timeout_s = req.get("timeout_s")
+                        if timeout_s is not None:
+                            timeout_s = float(timeout_s)
+
+                        if size < 0 or size > MAX_READ_BYTES:
+                            raise ValueError("ReadSizeInvalid")
+
+                        data = await asyncio.to_thread(
+                            engine.read,
+                            path,
+                            offset,
+                            size,
+                            mode,
+                            timeout_s,
+                        )
 
                         # Envia cabeçalho JSON
                         await send_json(
@@ -98,6 +142,34 @@ class TorrentFSServer:
                             },
                         )
 
+                except KeyError as e:
+                    err = e.args[0] if e.args else "UnknownError"
+                    if str(err).startswith("TorrentNotFound:"):
+                        msg = "Torrent nao encontrado. Use 'torrents' para listar."
+                    else:
+                        msg = str(err)
+                    await send_json(
+                        writer,
+                        {"id": req_id, "ok": False, "error": msg},
+                    )
+                except ValueError as e:
+                    err = str(e)
+                    if err.startswith("TorrentNameAmbiguous:"):
+                        name = err.split(":", 1)[1]
+                        msg = (
+                            f"Nome de torrent ambiguo: {name}. "
+                            "Use --torrent com o ID."
+                        )
+                    elif err == "TorrentRequired":
+                        msg = "Torrent obrigatorio. Use --torrent ou escolha um ID."
+                    elif err == "ReadSizeInvalid":
+                        msg = "Tamanho de leitura invalido."
+                    else:
+                        msg = err
+                    await send_json(
+                        writer,
+                        {"id": req_id, "ok": False, "error": msg},
+                    )
                 except FileNotFoundError:
                     await send_json(
                         writer,
@@ -148,11 +220,11 @@ class TorrentFSServer:
             await server.serve_forever()
 
 
-def run_server(engine, socket_path):
+def run_server(manager: TorrentManager, socket_path: str):
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    srv = TorrentFSServer(socket_path, engine)
+    srv = TorrentFSServer(socket_path, manager)
 
     async def runner():
         await srv.run()

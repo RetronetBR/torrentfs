@@ -1,12 +1,41 @@
 from __future__ import annotations
 
 import os
+import json
+import sys
 import time
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
 
 import libtorrent as lt
+
+# Limites mais altos para torrents com metadata grande.
+DEFAULT_MAX_METADATA_BYTES = 100 * 1024 * 1024
+DEFAULT_CONFIG_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "config", "torrentfsd.json")
+)
+
+
+def _parse_size_mb(value) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(float(value) * 1024 * 1024)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_config() -> dict:
+    path = os.environ.get("TORRENTFSD_CONFIG", DEFAULT_CONFIG_PATH)
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"[torrentfs] config invalida: {e}", file=sys.stderr)
+        return {}
 
 # Tenta usar o PathIndex do projeto.
 # Se ainda não existir, usa um fallback simples.
@@ -116,10 +145,27 @@ class TorrentEngine:
 
         # Session
         self.ses = lt.session()
+        cfg = _load_config()
+        max_metadata = DEFAULT_MAX_METADATA_BYTES
+        mb_value = _parse_size_mb(cfg.get("max_metadata_mb"))
+        if mb_value:
+            max_metadata = mb_value
+        elif "max_metadata_bytes" in cfg:
+            max_metadata = int(cfg.get("max_metadata_bytes", DEFAULT_MAX_METADATA_BYTES))
+        try:
+            self.ses.apply_settings(
+                {
+                    "max_metadata_size": max_metadata,
+                    "max_torrent_file_size": max_metadata,
+                }
+            )
+        except Exception:
+            # Algumas builds nao expõem todas as chaves.
+            pass
         self.ses.listen_on(listen_from, listen_to)
 
         # Torrent info + handle
-        self.info = lt.torrent_info(self.torrent_path)
+        self.info = _load_torrent_info(self.torrent_path, max_metadata)
         self.handle = self.ses.add_torrent(
             {
                 "ti": self.info,
@@ -137,6 +183,25 @@ class TorrentEngine:
         for i, f in enumerate(self.info.files()):
             # f.path (string com caminho relativo dentro do torrent)
             self.index.add_file(f.path, i, f.size)
+
+
+def _load_torrent_info(path: str, max_metadata: int) -> lt.torrent_info:
+    try:
+        return lt.torrent_info(
+            path,
+            {
+                "max_metadata_size": max_metadata,
+                "max_torrent_file_size": max_metadata,
+            },
+        )
+    except Exception as e:
+        if "metadata too large" not in str(e):
+            raise
+
+    # Fallback: carrega o .torrent manualmente e bdecode
+    with open(path, "rb") as f:
+        data = f.read()
+    return lt.torrent_info(lt.bdecode(data))
 
     # -----------------------------
     # Utilidades
@@ -260,7 +325,14 @@ class TorrentEngine:
             fi = int(st["file_index"])
             self.handle.file_priority(fi, 7)
 
-    def read(self, path: str, offset: int, size: int, mode: str = "auto") -> bytes:
+    def read(
+        self,
+        path: str,
+        offset: int,
+        size: int,
+        mode: str = "auto",
+        timeout_s: Optional[float] = None,
+    ) -> bytes:
         """
         Read por offset/size: ideal para FUSE e streaming (mpv/vlc).
 
@@ -268,6 +340,9 @@ class TorrentEngine:
           - "auto": streaming para mídia (ext) e normal para demais
           - "stream": força sequential + prioridades altas
           - "normal": sem sequential (ainda prioriza pieces necessárias)
+        timeout_s:
+          - None = espera indefinida
+          - float = limite de espera por pieces
         """
         with self._lock:
             st = self.index.stat(path)
@@ -287,7 +362,7 @@ class TorrentEngine:
             needed_pieces = self._prioritize_for_read(fi, offset, size, mode=mode)
 
             # Bloqueia até pieces chegarem (para FUSE isso é esperado)
-            self._wait_pieces(needed_pieces, deadline_s=None)
+            self._wait_pieces(needed_pieces, deadline_s=timeout_s)
 
             # Lê do arquivo materializado no cache
             rp = self._real_path(fi)
