@@ -291,13 +291,17 @@ class TorrentManager:
         for eng in items:
             eng.reannounce()
 
-    def cache_size(self) -> int:
-        total = 0
+    def cache_size(self) -> dict:
+        logical_total = 0
+        disk_total = 0
         for root, _, files in os.walk(self.cache_root):
             for name in files:
                 path = os.path.join(root, name)
                 try:
-                    total += os.path.getsize(path)
+                    st = os.stat(path)
+                    logical_total += int(st.st_size)
+                    # st_blocks is in 512-byte units on Linux
+                    disk_total += int(st.st_blocks) * 512
                 except OSError:
                     continue
-        return total
+        return {"logical": logical_total, "disk": disk_total}

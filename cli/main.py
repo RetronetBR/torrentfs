@@ -399,8 +399,10 @@ def main():
             if not resp.get("ok"):
                 _print_error(resp.get("error", "falha ao obter cache"))
                 return
-            size = resp.get("bytes", 0)
-            print(f"cache_size: {_fmt_bytes(size)}")
+            logical = resp.get("logical_bytes", 0)
+            disk = resp.get("disk_bytes", 0)
+            print(f"cache_logical: {_fmt_bytes(logical)}")
+            print(f"cache_disk: {_fmt_bytes(disk)}")
             return
 
         if args.cmd == "status-all":

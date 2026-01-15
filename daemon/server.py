@@ -86,10 +86,15 @@ class TorrentFSServer:
                             {"id": req_id, "ok": True},
                         )
                     elif cmd == "cache-size":
-                        size = self.manager.cache_size()
+                        sizes = self.manager.cache_size()
                         await send_json(
                             writer,
-                            {"id": req_id, "ok": True, "bytes": size},
+                            {
+                                "id": req_id,
+                                "ok": True,
+                                "logical_bytes": sizes["logical"],
+                                "disk_bytes": sizes["disk"],
+                            },
                         )
                     elif cmd == "downloads":
                         max_files = req.get("max_files")
