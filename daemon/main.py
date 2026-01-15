@@ -1,8 +1,10 @@
 # daemon/main.py
 import argparse
+import os
 import sys
 
 from daemon.manager import TorrentManager
+from daemon.engine import get_effective_config
 from daemon.watcher import TorrentDirWatcher
 from daemon.server import run_server
 
@@ -28,6 +30,16 @@ def main():
         default="/tmp/torrentfsd.sock",
         help="Socket UNIX do daemon",
     )
+    ap.add_argument(
+        "--prefetch",
+        action="store_true",
+        help="Prefetch automatico ao carregar torrents",
+    )
+    ap.add_argument(
+        "--skip-check",
+        action="store_true",
+        help="Pula verificacao de hash ao carregar torrents (mais rapido, menos seguro)",
+    )
 
     args = ap.parse_args()
 
@@ -43,13 +55,39 @@ def main():
     # -----------------------------
     # Inicialização do manager
     # -----------------------------
-    manager = TorrentManager(args.cache)
+    cfg = get_effective_config()
+    skip_check = bool(args.skip_check or cfg.get("skip_check"))
+    prefetch_on_start = bool(args.prefetch or cfg.get("prefetch_on_start"))
+    prefetch_max_files = int(cfg.get("prefetch_max_files", 0))
+    prefetch_sleep_ms = int(cfg.get("prefetch_sleep_ms", 25))
+    prefetch_batch_size = int(cfg.get("prefetch_batch_size", 10))
+    prefetch_batch_sleep_ms = int(cfg.get("prefetch_batch_sleep_ms", 200))
+    prefetch_on_start_mode = str(cfg.get("prefetch_on_start_mode", "media"))
+    prefetch_scan_sleep_ms = int(cfg.get("prefetch_scan_sleep_ms", 5))
+    prefetch_max_dirs = int(cfg.get("prefetch_max_dirs", 0))
+    prefetch_max_bytes = int(cfg.get("prefetch_max_bytes", 0))
+    checking_max_active = int(cfg.get("checking_max_active", 0))
+    manager = TorrentManager(
+        args.cache,
+        prefetch_on_start=prefetch_on_start,
+        prefetch_max_files=prefetch_max_files,
+        prefetch_sleep_ms=prefetch_sleep_ms,
+        prefetch_batch_size=prefetch_batch_size,
+        prefetch_batch_sleep_ms=prefetch_batch_sleep_ms,
+        prefetch_on_start_mode=prefetch_on_start_mode,
+        prefetch_scan_sleep_ms=prefetch_scan_sleep_ms,
+        prefetch_max_dirs=prefetch_max_dirs,
+        prefetch_max_bytes=prefetch_max_bytes,
+        skip_check=skip_check,
+        checking_max_active=checking_max_active,
+    )
 
     # -----------------------------
     # Modo single-torrent
     # -----------------------------
     if args.torrent:
         try:
+            manager.wait_for_check_slot(pending_name=os.path.basename(args.torrent))
             manager.add_torrent(args.torrent)
         except Exception as e:
             print(f"[torrentfs] erro ao carregar torrent: {e}", file=sys.stderr)

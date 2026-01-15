@@ -31,14 +31,19 @@ class TorrentDirWatcher(threading.Thread):
         print(f"[torrentfs] monitorando: {self.torrent_dir}")
         while True:
             try:
-                for name in os.listdir(self.torrent_dir):
-                    if not name.endswith(".torrent"):
-                        continue
-
+                current = set()
+                names = [n for n in os.listdir(self.torrent_dir) if n.endswith(".torrent")]
+                names.sort()
+                new_paths = []
+                for name in names:
                     path = os.path.join(self.torrent_dir, name)
+                    current.add(path)
+                    if path not in self.seen:
+                        new_paths.append(path)
 
-                    if path in self.seen:
-                        continue
+                total_new = len(new_paths)
+                for idx, path in enumerate(new_paths, start=1):
+                    name = os.path.basename(path)
 
                     now = time.time()
                     pend = self.pending.get(path)
@@ -50,6 +55,8 @@ class TorrentDirWatcher(threading.Thread):
                         continue
 
                     try:
+                        self.manager.wait_for_check_slot(pending_name=name)
+                        print(f"[torrentfs] carregando ({idx}/{total_new}): {name}")
                         self.manager.add_torrent(path)
                         self.seen.add(path)
                         self.pending.pop(path, None)
@@ -69,6 +76,13 @@ class TorrentDirWatcher(threading.Thread):
                             "attempts": attempts,
                             "next_try": next_try,
                         }
+
+                removed = [p for p in self.seen if p not in current]
+                for path in removed:
+                    if self.manager.remove_torrent(path):
+                        print(f"[torrentfs] removido torrent: {os.path.basename(path)}")
+                    self.seen.discard(path)
+                    self.pending.pop(path, None)
 
             except Exception as e:
                 print(f"[torrentfs] watcher fatal error: {e}")

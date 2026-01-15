@@ -8,15 +8,15 @@ import os
 import stat
 import sys
 import time
-from typing import Dict, Iterable, Optional
+from typing import Dict, Iterable, Optional, Tuple
 
-from fuse.client import rpc_call_sync
+from .client import rpc_call_sync
 
 
 def _load_fusepy():
     """
-    Evita colisão com este pacote local chamado 'fuse', carregando o módulo
-    externo fusepy (também chamado 'fuse') fora do diretório do projeto.
+    Carrega o módulo externo fusepy (também chamado 'fuse') fora do diretório
+    do projeto para evitar colisões com módulos locais.
     """
     here = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
     alt_paths = [p for p in sys.path if os.path.abspath(p) != here]
@@ -65,7 +65,7 @@ class TorrentFS(Operations):
     FUSE read-only mapeando operações para o RPC do daemon.
     """
 
-    def __init__(self, socket_path: str, torrent: str, read_mode: str = "auto", timeout_s: float = 5.0):
+    def __init__(self, socket_path: str, torrent: Optional[str], read_mode: str = "auto", timeout_s: float = 5.0):
         self.socket_path = socket_path
         self.torrent = torrent
         self.read_mode = read_mode
@@ -73,24 +73,26 @@ class TorrentFS(Operations):
         self._start_time = time.time()
         self._stat_cache: Dict[str, Dict] = {}
         self._stat_ttl = 10.0  # segundos
+        self._torrents_cache: Dict[str, Dict] = {}
+        self._torrents_ttl = 5.0  # segundos
 
     # ---------------
     # Helpers
     # ---------------
-    def _cache_get(self, path: str) -> Optional[Dict]:
-        item = self._stat_cache.get(path)
+    def _cache_get(self, key: str) -> Optional[Dict]:
+        item = self._stat_cache.get(key)
         if not item:
             return None
         ts = item.get("_ts", 0)
         if (time.time() - ts) > self._stat_ttl:
-            self._stat_cache.pop(path, None)
+            self._stat_cache.pop(key, None)
             return None
         return {k: v for k, v in item.items() if k != "_ts"}
 
-    def _cache_set(self, path: str, stat_obj: Dict) -> None:
+    def _cache_set(self, key: str, stat_obj: Dict) -> None:
         data = dict(stat_obj)
         data["_ts"] = time.time()
-        self._stat_cache[path] = data
+        self._stat_cache[key] = data
 
     def _make_child_path(self, parent: str, name: str) -> str:
         parent = _clean_path(parent)
@@ -98,54 +100,120 @@ class TorrentFS(Operations):
             return name
         return f"{parent}/{name}"
 
+    def _cache_key(self, torrent: Optional[str], path: str) -> str:
+        t = torrent if torrent else "_root"
+        return f"{t}:{_clean_path(path)}"
+
+    def _list_torrents(self):
+        cached = self._torrents_cache.get("list")
+        if cached:
+            ts = cached.get("_ts", 0)
+            if (time.time() - ts) <= self._torrents_ttl:
+                return cached["items"]
+
+        resp, _ = rpc_call_sync(self.socket_path, {"cmd": "torrents"})
+        if not resp.get("ok"):
+            raise _error_from_resp(resp)
+
+        torrents = resp.get("torrents", [])
+        name_counts: Dict[str, int] = {}
+        for t in torrents:
+            tname = str(t.get("torrent_name", ""))
+            base = os.path.splitext(tname)[0] if tname else str(t.get("name", ""))
+            name_counts[base] = name_counts.get(base, 0) + 1
+
+        mapped = []
+        for t in torrents:
+            tid = str(t.get("id", ""))
+            name = str(t.get("name", tid))
+            tname = str(t.get("torrent_name", ""))
+            base = os.path.splitext(tname)[0] if tname else name
+            if name_counts.get(base, 0) <= 1:
+                dir_name = base
+            else:
+                dir_name = f"{base}__{tid}"
+            mapped.append({"id": tid, "name": name, "torrent_name": tname, "dir_name": dir_name})
+
+        self._torrents_cache["list"] = {"_ts": time.time(), "items": mapped}
+        return mapped
+
+    def _torrent_dir_map(self) -> Dict[str, str]:
+        return {t["dir_name"]: t["id"] for t in self._list_torrents()}
+
+    def _resolve_path(self, path: str) -> Tuple[Optional[str], str, bool]:
+        clean = _clean_path(path)
+        if self.torrent:
+            return self.torrent, clean, clean == ""
+
+        if clean == "":
+            return None, "", True
+
+        parts = clean.split("/", 1)
+        dir_name = parts[0]
+        inner = parts[1] if len(parts) > 1 else ""
+        tid = self._torrent_dir_map().get(dir_name)
+        if not tid:
+            raise FileNotFoundError(dir_name)
+        return tid, inner, inner == ""
+
     def _stat(self, path: str) -> Dict:
-        if path in ("", "/"):
+        torrent, inner, is_root = self._resolve_path(path)
+        if is_root:
             return {
                 "type": "dir",
                 "size": 0,
             }
 
-        cached = self._cache_get(path)
+        cache_key = self._cache_key(torrent, inner)
+        cached = self._cache_get(cache_key)
         if cached:
             return cached
 
         resp, _ = rpc_call_sync(
             self.socket_path,
-            {"cmd": "stat", "torrent": self.torrent, "path": _clean_path(path)},
+            {"cmd": "stat", "torrent": torrent, "path": inner},
         )
         if not resp.get("ok"):
             raise _error_from_resp(resp)
         st = resp["stat"]
-        self._cache_set(path, st)
+        self._cache_set(cache_key, st)
         return st
 
     def _list(self, path: str):
+        if not self.torrent and path in ("", "/"):
+            return [{"name": t["dir_name"], "type": "dir", "size": 0} for t in self._list_torrents()]
+
+        torrent, inner, _ = self._resolve_path(path)
         resp, _ = rpc_call_sync(
             self.socket_path,
-            {"cmd": "list", "torrent": self.torrent, "path": _clean_path(path)},
+            {"cmd": "list", "torrent": torrent, "path": inner},
         )
         if not resp.get("ok"):
             raise _error_from_resp(resp)
         entries = resp.get("entries", [])
         # Preenche cache com resultados da listagem.
         for e in entries:
-            child_path = self._make_child_path(path, e["name"])
+            child_path = self._make_child_path(inner, e["name"])
+            cache_key = self._cache_key(torrent, child_path)
             if e["type"] == "dir":
-                self._cache_set(child_path, {"type": "dir", "size": 0})
+                self._cache_set(cache_key, {"type": "dir", "size": 0})
             else:
                 self._cache_set(
-                    child_path,
+                    cache_key,
                     {"type": "file", "size": int(e.get("size", 0))},
                 )
         return entries
 
     def _read(self, path: str, offset: int, size: int):
+        torrent, inner, is_root = self._resolve_path(path)
+        if is_root and inner == "":
+            raise FuseOSError(errno.EISDIR)
         resp, data = rpc_call_sync(
             self.socket_path,
             {
                 "cmd": "read",
-                "torrent": self.torrent,
-                "path": _clean_path(path),
+                "torrent": torrent,
+                "path": inner,
                 "offset": int(offset),
                 "size": int(size),
                 "mode": self.read_mode,
@@ -156,6 +224,17 @@ class TorrentFS(Operations):
         if not resp.get("ok"):
             raise _error_from_resp(resp)
         return data
+
+    def _prefetch(self, path: str) -> None:
+        torrent, inner, is_root = self._resolve_path(path)
+        if is_root and inner == "":
+            raise FuseOSError(errno.EISDIR)
+        resp, _ = rpc_call_sync(
+            self.socket_path,
+            {"cmd": "prefetch", "torrent": torrent, "path": inner},
+        )
+        if not resp.get("ok"):
+            raise _error_from_resp(resp)
 
     # ---------------
     # FUSE callbacks
@@ -204,6 +283,10 @@ class TorrentFS(Operations):
         # read-only: rejeita apenas se solicitarem WR ou RDWR
         if flags & os.O_WRONLY or flags & os.O_RDWR:
             raise FuseOSError(errno.EACCES)
+        try:
+            self._prefetch(path)
+        except Exception:
+            pass
         return 0
 
     def read(self, path: str, size: int, offset: int, fh):
@@ -229,7 +312,7 @@ class TorrentFS(Operations):
 def main():
     ap = argparse.ArgumentParser("torrentfs-fuse")
     ap.add_argument("--socket", default="/tmp/torrentfsd.sock", help="Socket UNIX do daemon")
-    ap.add_argument("--torrent", required=True, help="ID ou nome do torrent a montar")
+    ap.add_argument("--torrent", help="ID ou nome do torrent a montar (se omitido, monta todos)")
     ap.add_argument("--mount", required=True, help="Diretório de mountpoint")
     ap.add_argument(
         "--allow-other",

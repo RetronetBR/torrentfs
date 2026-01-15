@@ -2,13 +2,70 @@
 
 Read-only P2P filesystem built on BitTorrent.
 
+See `INSTALL.md` for installation instructions.
+
 ## Config
 
 Arquivo: `config/torrentfsd.json`
 
 ```json
 {
-  "max_metadata_mb": 100
+  "max_metadata_mb": 100,
+  "skip_check": false,
+  "checking": {
+    "max_active": 0
+  },
+  "resume": {
+    "save_interval_s": 300
+  },
+  "prefetch": {
+    "on_start": false,
+    "on_start_mode": "media",
+    "max_mb": 0,
+    "max_files": 0,
+    "sleep_ms": 25,
+    "batch_size": 10,
+    "batch_sleep_ms": 200,
+    "scan_sleep_ms": 5,
+    "max_dirs": 0,
+    "media": {
+      "extensions": [
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov",
+        ".m4v",
+        ".webm",
+        ".mp3",
+        ".flac",
+        ".aac",
+        ".ogg",
+        ".wav",
+        ".pdf",
+        ".epub",
+        ".cbz",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif"
+      ],
+      "start_pct": 0.10,
+      "end_pct": 0.02,
+      "start_min_mb": 4,
+      "start_max_mb": 64,
+      "end_min_mb": 1,
+      "end_max_mb": 16
+    },
+    "other": {
+      "start_pct": 0.10,
+      "end_pct": 0.05,
+      "start_min_mb": 1,
+      "start_max_mb": 32,
+      "end_min_mb": 1,
+      "end_max_mb": 16
+    }
+  }
 }
 ```
 
@@ -19,65 +76,314 @@ Tambem pode apontar outro arquivo via `TORRENTFSD_CONFIG`.
 Single torrent:
 
 ```bash
-python -m daemon.main --torrent /path/file.torrent --cache ./cache --socket /tmp/torrentfsd.sock
+python -m daemon.main --torrent /path/file.torrent --cache ./cache --socket /tmp/torrentfsd.sock --prefetch --skip-check
+```
+
+Ou, se instalado via pacote:
+
+```bash
+torrentfsd --torrent /path/file.torrent --cache ./cache --socket /tmp/torrentfsd.sock --prefetch --skip-check
 ```
 
 Monitor a directory of torrents:
 
 ```bash
-python -m daemon.main --torrent-dir /path/torrents --cache ./cache --socket /tmp/torrentfsd.sock
+python -m daemon.main --torrent-dir /path/torrents --cache ./cache --socket /tmp/torrentfsd.sock --prefetch --skip-check
 ```
 
+Ou:
+
+```bash
+torrentfsd --torrent-dir /path/torrents --cache ./cache --socket /tmp/torrentfsd.sock --prefetch --skip-check
+```
+
+Observacao: ao remover um arquivo .torrent do diretorio monitorado, o daemon remove o torrent e limpa o cache correspondente.
+
 ## CLI
+
+Se instalado via pacote, os comandos ficam disponíveis no PATH:
+- `torrentfs` (CLI)
+- `torrentfsd` (daemon)
+- `torrentfs-fuse` (FUSE)
+
+Opcional: use `--socket` para apontar outro socket quando houver mais de um daemon.
+Opcional: use `--mount` para permitir paths do filesystem (ex.: `/mnt/torrentfs/...`) em comandos com `path`.
+Opcional: use `--json` para forcar saida em JSON.
+Opcional: use `torrentfs` no lugar de `python -m cli.main` (quando instalado via pacote).
 
 List loaded torrents:
 
 ```bash
-python -m cli.main --socket /tmp/torrentfsd.sock torrents
+python -m cli.main torrents
+```
+
+Ou:
+
+```bash
+torrentfs torrents
+```
+
+Show daemon config (effective values):
+
+```bash
+python -m cli.main config
+```
+
+Ou:
+
+```bash
+torrentfs config
+```
+
+Cache size:
+
+```bash
+python -m cli.main cache-size
+```
+
+Ou:
+
+```bash
+torrentfs cache-size
 ```
 
 Status:
 
 ```bash
-python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> status
+python -m cli.main --torrent <id|name> status
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> status
+```
+
+Status (todos os torrents):
+
+```bash
+python -m cli.main status-all
+```
+
+Ou:
+
+```bash
+torrentfs status-all
+```
+
+Downloads em execucao:
+
+```bash
+python -m cli.main downloads --max-files 20
+```
+
+Ou:
+
+```bash
+torrentfs downloads --max-files 20
+```
+
+Forcar announce (um torrent):
+
+```bash
+python -m cli.main --torrent <id|name> reannounce
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> reannounce
+```
+
+Forcar announce (todos os torrents):
+
+```bash
+python -m cli.main reannounce-all
+```
+
+Ou:
+
+```bash
+torrentfs reannounce-all
+```
+
+Info de arquivo (pieces):
+
+```bash
+python -m cli.main --torrent <id|name> file-info <path>
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> file-info <path>
+```
+
+Info de prefetch (bytes/pieces):
+
+```bash
+python -m cli.main --torrent <id|name> prefetch-info <path>
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> prefetch-info <path>
 ```
 
 List directory:
 
 ```bash
-python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> ls [path]
+python -m cli.main --torrent <id|name> ls [path]
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> ls [path]
 ```
 
 Read file bytes:
 
 ```bash
-python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto
+python -m cli.main --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto
+```
+
+Copy from mount to local disk:
+
+```bash
+python -m cli.main --torrent <id|name> cp <src> <dest> --chunk-size 1048576 --progress --read-timeout 1
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> cp <src> <dest> --chunk-size 1048576 --progress --read-timeout 1
+```
+
+Disk usage (soma dos arquivos):
+
+```bash
+python -m cli.main --torrent <id|name> du [path] --depth 2
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> du [path] --depth 2
 ```
 
 Pin file:
 
 ```bash
-python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> pin <path>
+python -m cli.main --torrent <id|name> pin <path>
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> pin <path>
+```
+
+Pin directory (recursive):
+
+```bash
+python -m cli.main --torrent <id|name> pin-dir <path> --max-files 100 --depth 2
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> pin-dir <path> --max-files 100 --depth 2
+```
+
+Unpin file:
+
+```bash
+python -m cli.main --torrent <id|name> unpin <path>
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> unpin <path>
+```
+
+Unpin directory (recursive):
+
+```bash
+python -m cli.main --torrent <id|name> unpin-dir <path> --max-files 100 --depth 2
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> unpin-dir <path> --max-files 100 --depth 2
+```
+
+Prefetch file or directory (recursive):
+
+```bash
+python -m cli.main --torrent <id|name> prefetch <path> --max-files 100 --depth 2
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> prefetch <path> --max-files 100 --depth 2
 ```
 
 List pinned files:
 
 ```bash
-python -m cli.main --socket /tmp/torrentfsd.sock --torrent <id|name> pinned
+python -m cli.main --torrent <id|name> pinned
 ```
 
+Ou:
+
+```bash
+torrentfs --torrent <id|name> pinned
+```
 ## FUSE (read-only)
 
 Pré-requisitos: fuse/fuse3 instalado no sistema, usuário com permissão para montar e `fusepy` instalado (já em `requirements.txt`).
 
 Montar (modo foreground para debug):
 ```bash
-python -m fuse.fs --socket /tmp/torrentfsd.sock --torrent <id|name> --mount /mnt/torrentfs --mode auto --foreground
+python -m torrentfs_fuse.fs --torrent <id|name> --mount /mnt/torrentfs --mode auto --foreground
 ```
 
 Opções úteis:
 - `--allow-other`: permite que outros usuários leiam (requer `user_allow_other` em `/etc/fuse.conf`).
 - `--uid/--gid`: força UID/GID apresentados nos arquivos (default: do usuário que executa ou SUDO_UID/SUDO_GID).
+
+Modo multi-torrent:
+- Se `--torrent` não for informado, o root do mount lista um diretório por torrent carregado.
+- Diretórios usam o nome do arquivo `.torrent` (sem extensão) quando único; se houver duplicados, o formato vira `nome__<id>`.
+
+Pre-cache:
+- Ao abrir um arquivo via FUSE ou usar o comando `prefetch`, o daemon prioriza o inicio e o final do arquivo para acelerar streaming e visualizacao.
+- Arquivos pinados continuam com prioridade total e tendem a baixar por completo.
+- Percentuais aceitam valores em `0-1` (ex.: `0.10`) ou `0-100` (ex.: `10`).
+- A lista `prefetch.media.extensions` define quais extensoes usam o perfil de midia (ex.: `.pdf`, `.epub`).
+- `prefetch.on_start` ativa o prefetch automatico ao carregar torrents (tambem pode ser forçado com `--prefetch`).
+- `prefetch.on_start_mode` pode ser `media` (somente extensoes configuradas) ou `all`.
+- `prefetch.max_mb` limita o total de bytes prefetchados por torrent (0 = ilimitado).
+- `prefetch.max_files` limita quantos arquivos sao prefetchados por torrent (0 = ilimitado).
+- `prefetch.sleep_ms` adiciona pausa entre arquivos para reduzir uso de CPU.
+- `prefetch.batch_size` define quantos arquivos sao processados por lote.
+- `prefetch.batch_sleep_ms` adiciona pausa entre lotes.
+- `prefetch.scan_sleep_ms` adiciona pausa entre diretorios durante a varredura.
+- `prefetch.max_dirs` limita quantos diretorios sao varridos por torrent (0 = ilimitado).
+- `skip_check` pula verificacao de hash ao carregar torrents (mais rapido, menos seguro).
+- `checking.max_active` limita quantos torrents ficam em `checking_files` ao mesmo tempo (0 = default do libtorrent).
+- `resume.save_interval_s` salva resume data periodicamente para reduzir `checking_files` no restart (0 = desliga).
 
 Desmontar:
 - Linux: `fusermount -u /mnt/torrentfs`

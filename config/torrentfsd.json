@@ -1,3 +1,58 @@
 {
-  "max_metadata_mb": 100
+  "max_metadata_mb": 100,
+  "skip_check": false,
+  "checking": {
+    "max_active": 1
+  },
+  "resume": {
+    "save_interval_s": 300
+  },
+  "prefetch": {
+    "on_start": false,
+    "on_start_mode": "media",
+    "max_mb": 0,
+    "max_files": 0,
+    "sleep_ms": 25,
+    "batch_size": 10,
+    "batch_sleep_ms": 200,
+    "scan_sleep_ms": 5,
+    "max_dirs": 0,
+    "media": {
+      "extensions": [
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov",
+        ".m4v",
+        ".webm",
+        ".mp3",
+        ".flac",
+        ".aac",
+        ".ogg",
+        ".wav",
+        ".pdf",
+        ".epub",
+        ".cbz",
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".gif"
+      ],
+      "start_pct": 0.10,
+      "end_pct": 0.02,
+      "start_min_mb": 4,
+      "start_max_mb": 64,
+      "end_min_mb": 1,
+      "end_max_mb": 16
+    },
+    "other": {
+      "start_pct": 0.10,
+      "end_pct": 0.05,
+      "start_min_mb": 1,
+      "start_max_mb": 32,
+      "end_min_mb": 1,
+      "end_max_mb": 16
+    }
+  }
 }

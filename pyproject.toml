@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "torrentfsd"
+version = "0.1.0"
+description = "Read-only P2P filesystem built on BitTorrent."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "libtorrent",
+  "fusepy",
+]
+
+[project.scripts]
+torrentfs = "cli.main:main"
+torrentfsd = "daemon.main:main"
+torrentfs-fuse = "torrentfs_fuse.fs:main"
+
+[tool.setuptools]
+packages = ["cli", "common", "daemon", "torrentfs_fuse"]
