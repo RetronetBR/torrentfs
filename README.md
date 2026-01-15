@@ -123,6 +123,18 @@ Ou:
 torrentfs torrents
 ```
 
+Add magnet (salva .torrent em `torrents/`):
+
+```bash
+python -m cli.main add-magnet "<magnet:...>"
+```
+
+Ou:
+
+```bash
+torrentfs add-magnet "<magnet:...>"
+```
+
 Show daemon config (effective values):
 
 ```bash
@@ -253,6 +265,18 @@ Ou:
 
 ```bash
 torrentfs --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto
+```
+
+Cat aguardando download:
+
+```bash
+python -m cli.main --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto --wait
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto --wait
 ```
 
 Copy from mount to local disk:
