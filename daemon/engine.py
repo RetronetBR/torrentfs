@@ -15,6 +15,24 @@ DEFAULT_MAX_METADATA_BYTES = 100 * 1024 * 1024
 DEFAULT_CONFIG_PATH = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "config", "torrentfsd.json")
 )
+SYSTEM_CONFIG_PATH = "/etc/torrentfs/torrentfsd.json"
+
+
+def _user_config_path() -> str:
+    home = os.path.expanduser("~")
+    return os.path.join(home, ".config", "torrentfs", "torrentfsd.json")
+
+
+def _find_config_path() -> str:
+    env = os.environ.get("TORRENTFSD_CONFIG")
+    if env:
+        return env
+    user_path = _user_config_path()
+    if os.path.exists(user_path):
+        return user_path
+    if os.path.exists(SYSTEM_CONFIG_PATH):
+        return SYSTEM_CONFIG_PATH
+    return DEFAULT_CONFIG_PATH
 PREFETCH_MEDIA_START_PCT = 0.10
 PREFETCH_MEDIA_END_PCT = 0.02
 PREFETCH_MEDIA_START_MIN = 4 * 1024 * 1024
@@ -204,7 +222,7 @@ def _build_add_torrent_params(info: lt.torrent_info, cache_dir: str, skip_check:
 
 
 def _load_config() -> dict:
-    path = os.environ.get("TORRENTFSD_CONFIG", DEFAULT_CONFIG_PATH)
+    path = _find_config_path()
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -216,7 +234,7 @@ def _load_config() -> dict:
 
 
 def _load_config_with_meta() -> dict:
-    path = os.environ.get("TORRENTFSD_CONFIG", DEFAULT_CONFIG_PATH)
+    path = _find_config_path()
     data = _load_config()
     data["_config_path"] = path
     return data

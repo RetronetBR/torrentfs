@@ -6,6 +6,12 @@ import os
 import json
 import sys
 import time
+import re
+
+try:
+    import libtorrent as lt
+except Exception:
+    lt = None
 
 from cli.client import rpc_call
 
@@ -92,6 +98,23 @@ def main():
     sub.add_parser("cache-size", help="Tamanho total do cache")
 
     # -----------------------------
+    # add-magnet
+    # -----------------------------
+    p_add_magnet = sub.add_parser("add-magnet", help="Adicionar magnet e salvar .torrent")
+    p_add_magnet.add_argument("magnet")
+    p_add_magnet.add_argument(
+        "--dir",
+        default="torrents",
+        help="Diretorio onde salvar o .torrent (default: torrents)",
+    )
+    p_add_magnet.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Timeout para baixar metadata (segundos)",
+    )
+
+    # -----------------------------
     # status
     # -----------------------------
     p_status = sub.add_parser("status")
@@ -163,6 +186,26 @@ def main():
     p_cat.add_argument("--offset", type=int, default=0)
     p_cat.add_argument("--mode", default="auto")
 
+    # -----------------------------
+    # cat (wait)
+    # -----------------------------
+    p_cat.add_argument(
+        "--wait",
+        action="store_true",
+        help="Aguarda download das pieces (retry em timeout)",
+    )
+    p_cat.add_argument(
+        "--timeout",
+        type=float,
+        default=1.0,
+        help="Timeout por tentativa (segundos)",
+    )
+    p_cat.add_argument(
+        "--retry-sleep",
+        type=float,
+        default=0.2,
+        help="Espera entre tentativas (segundos)",
+    )
     # -----------------------------
     # pin
     # -----------------------------
@@ -307,6 +350,44 @@ def main():
         def _fmt_rate(value: float) -> str:
             return f"{_fmt_bytes(value)}/s"
 
+        def _sanitize_name(name: str) -> str:
+            base = name.strip()
+            base = base.replace(os.sep, "_")
+            base = re.sub(r"[\\/:*?\"<>|]+", "_", base)
+            base = re.sub(r"\s+", " ", base).strip()
+            return base or "torrent"
+
+        def _infohash_hex_from_ti(ti) -> str:
+            try:
+                ih = ti.info_hashes()
+                if getattr(ih, "has_v1", False) and ih.v1:
+                    return str(ih.v1)
+                if getattr(ih, "has_v2", False) and ih.v2:
+                    return str(ih.v2)
+            except Exception:
+                pass
+            try:
+                return str(ti.info_hash())
+            except Exception:
+                return ""
+
+        def _existing_infohashes(torrent_dir: str):
+            out = {}
+            try:
+                names = [n for n in os.listdir(torrent_dir) if n.endswith(".torrent")]
+            except FileNotFoundError:
+                return out
+            for name in names:
+                path = os.path.join(torrent_dir, name)
+                try:
+                    ti = lt.torrent_info(path)
+                except Exception:
+                    continue
+                ih = _infohash_hex_from_ti(ti)
+                if ih:
+                    out[ih] = path
+            return out
+
         def _print_status_all(resp):
             if args.json:
                 _print_json(resp)
@@ -403,6 +484,71 @@ def main():
             disk = resp.get("disk_bytes", 0)
             print(f"cache_logical: {_fmt_bytes(logical)}")
             print(f"cache_disk: {_fmt_bytes(disk)}")
+            return
+
+        if args.cmd == "add-magnet":
+            if lt is None:
+                _print_error("libtorrent nao disponivel no ambiente")
+                return
+            torrent_dir = os.path.abspath(args.dir)
+            os.makedirs(torrent_dir, exist_ok=True)
+
+            try:
+                params = lt.parse_magnet_uri(args.magnet)
+            except Exception as e:
+                _print_error(f"magnet invalido: {e}")
+                return
+
+            existing = _existing_infohashes(torrent_dir)
+            infohash = ""
+            try:
+                ih = params.info_hashes
+                if getattr(ih, "has_v1", False) and ih.v1:
+                    infohash = str(ih.v1)
+                elif getattr(ih, "has_v2", False) and ih.v2:
+                    infohash = str(ih.v2)
+            except Exception:
+                pass
+            if infohash and infohash in existing:
+                _print_ok(f"ja existe: {existing[infohash]}")
+                return
+
+            ses = lt.session()
+            ses.listen_on(6881, 6891)
+            handle = ses.add_torrent(params)
+
+            start = time.time()
+            while not handle.has_metadata():
+                if (time.time() - start) > args.timeout:
+                    _print_error("timeout aguardando metadata")
+                    return
+                time.sleep(0.2)
+
+            ti = handle.torrent_file()
+            infohash = _infohash_hex_from_ti(ti)
+            if infohash and infohash in existing:
+                _print_ok(f"ja existe: {existing[infohash]}")
+                return
+
+            name = getattr(params, "name", "") or ti.name()
+            base = _sanitize_name(name)
+            out_name = f"{base}.torrent"
+            out_path = os.path.join(torrent_dir, out_name)
+            if os.path.exists(out_path):
+                suffix = infohash[:12] if infohash else str(int(time.time()))
+                out_name = f"{base}__{suffix}.torrent"
+                out_path = os.path.join(torrent_dir, out_name)
+
+            try:
+                data = lt.bencode(ti.generate())
+            except Exception as e:
+                _print_error(f"falha ao gerar .torrent: {e}")
+                return
+
+            with open(out_path, "wb") as f:
+                f.write(data)
+
+            _print_ok(f"salvo: {out_path}")
             return
 
         if args.cmd == "status-all":
@@ -752,25 +898,55 @@ def main():
                 print(f"{etype}\t{size}\t{name}")
 
         elif args.cmd == "cat":
-            resp, data = await rpc_call(
-                args.socket,
-                {
-                    "cmd": "read",
-                    "torrent": torrent,
-                    "path": args.path,
-                    "offset": args.offset,
-                    "size": args.size,
-                    "mode": args.mode,
-                },
-                want_bytes=True,
-            )
-            if not resp.get("ok"):
-                if args.json:
-                    _print_json(resp)
-                else:
-                    _print_error(resp.get("error", "falha ao ler arquivo"))
-                return
-            os.write(1, data)
+            if args.wait:
+                timeout_s = float(args.timeout)
+                retry_sleep = float(args.retry_sleep)
+                while True:
+                    resp, data = await rpc_call(
+                        args.socket,
+                        {
+                            "cmd": "read",
+                            "torrent": torrent,
+                            "path": args.path,
+                            "offset": args.offset,
+                            "size": args.size,
+                            "mode": args.mode,
+                            "timeout_s": timeout_s,
+                        },
+                        want_bytes=True,
+                    )
+                    if resp.get("ok"):
+                        os.write(1, data)
+                        return
+                    err = resp.get("error", "")
+                    if "Timeout" in err:
+                        await asyncio.sleep(retry_sleep)
+                        continue
+                    if args.json:
+                        _print_json(resp)
+                    else:
+                        _print_error(resp.get("error", "falha ao ler arquivo"))
+                    return
+            else:
+                resp, data = await rpc_call(
+                    args.socket,
+                    {
+                        "cmd": "read",
+                        "torrent": torrent,
+                        "path": args.path,
+                        "offset": args.offset,
+                        "size": args.size,
+                        "mode": args.mode,
+                    },
+                    want_bytes=True,
+                )
+                if not resp.get("ok"):
+                    if args.json:
+                        _print_json(resp)
+                    else:
+                        _print_error(resp.get("error", "falha ao ler arquivo"))
+                    return
+                os.write(1, data)
 
         elif args.cmd == "pin":
             resp, _ = await rpc_call(

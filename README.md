@@ -6,7 +6,11 @@ See `INSTALL.md` for installation instructions.
 
 ## Config
 
-Arquivo: `config/torrentfsd.json`
+Arquivo (ordem de prioridade):
+- `$TORRENTFSD_CONFIG`
+- `$HOME/.config/torrentfs/torrentfsd.json`
+- `/etc/torrentfs/torrentfsd.json`
+- `config/torrentfsd.json` (fallback no repo)
 
 ```json
 {
@@ -121,6 +125,18 @@ Ou:
 
 ```bash
 torrentfs torrents
+```
+
+Add magnet (salva .torrent em `torrents/`):
+
+```bash
+python -m cli.main add-magnet "<magnet:...>"
+```
+
+Ou:
+
+```bash
+torrentfs add-magnet "<magnet:...>"
 ```
 
 Show daemon config (effective values):
@@ -255,6 +271,18 @@ Ou:
 torrentfs --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto
 ```
 
+Cat aguardando download:
+
+```bash
+python -m cli.main --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto --wait
+```
+
+Ou:
+
+```bash
+torrentfs --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto --wait
+```
+
 Copy from mount to local disk:
 
 ```bash
@@ -354,14 +382,18 @@ torrentfs --torrent <id|name> pinned
 
 Pré-requisitos: fuse/fuse3 instalado no sistema, usuário com permissão para montar e `fusepy` instalado (já em `requirements.txt`).
 
-Montar (modo foreground para debug):
+Montar:
 ```bash
-python -m torrentfs_fuse.fs --torrent <id|name> --mount /mnt/torrentfs --mode auto --foreground
+python -m torrentfs_fuse.fs --torrent <id|name> --mount /mnt/torrentfs --mode auto
 ```
 
 Opções úteis:
 - `--allow-other`: permite que outros usuários leiam (requer `user_allow_other` em `/etc/fuse.conf`).
 - `--uid/--gid`: força UID/GID apresentados nos arquivos (default: do usuário que executa ou SUDO_UID/SUDO_GID).
+- `--stat-ttl`: TTL do cache de `stat` (segundos).
+- `--list-ttl`: TTL do cache de `list` (segundos).
+- `--readdir-prefetch`: prefetch de N arquivos ao listar diretórios.
+- `--readdir-prefetch-mode`: `media` ou `all`.
 
 Modo multi-torrent:
 - Se `--torrent` não for informado, o root do mount lista um diretório por torrent carregado.
