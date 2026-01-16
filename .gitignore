@@ -6,6 +6,7 @@ mnt/
 __pycache__/
 .venv/
 *.egg-info/
+dist/
 
 # Torrent files
 torrents/

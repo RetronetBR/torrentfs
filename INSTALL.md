@@ -34,6 +34,7 @@ brew install python libtorrent-rasterbar macfuse
 
 Observacao:
 - Em Linux, para permitir `--allow-other`, habilite `user_allow_other` em `/etc/fuse.conf`.
+- O arquivo de configuracao e lido em: `$TORRENTFSD_CONFIG`, `$HOME/.config/torrentfs/torrentfsd.json`, `/etc/torrentfs/torrentfsd.json`.
 
 Referencias Linux:
 - FUSE: https://github.com/libfuse/libfuse
@@ -49,7 +50,25 @@ O cliente atual usa FUSE (via fusepy), entao no Windows seria necessario usar um
 Libtorrent no Windows:
 - https://www.libtorrent.org/
 
-Instalacao (modo desenvolvimento):
+## Instalacao via pipx (recomendado)
+
+```bash
+pipx install .
+```
+
+## Instalacao via pacote .deb (futuro)
+
+```bash
+sudo apt install ./torrentfs_0.1.0_all.deb
+```
+
+## Build do pacote .deb
+
+```bash
+./scripts/build_deb.sh
+```
+
+## Instalacao (modo desenvolvimento):
 
 ```bash
 python3 -m venv .venv

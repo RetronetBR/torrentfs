@@ -6,7 +6,11 @@ See `INSTALL.md` for installation instructions.
 
 ## Config
 
-Arquivo: `config/torrentfsd.json`
+Arquivo (ordem de prioridade):
+- `$TORRENTFSD_CONFIG`
+- `$HOME/.config/torrentfs/torrentfsd.json`
+- `/etc/torrentfs/torrentfsd.json`
+- `config/torrentfsd.json` (fallback no repo)
 
 ```json
 {
