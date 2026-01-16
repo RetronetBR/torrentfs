@@ -7,6 +7,7 @@ import importlib.util
 import os
 import stat
 import sys
+import threading
 import time
 from typing import Dict, Iterable, Optional, Tuple
 
@@ -65,16 +66,32 @@ class TorrentFS(Operations):
     FUSE read-only mapeando operações para o RPC do daemon.
     """
 
-    def __init__(self, socket_path: str, torrent: Optional[str], read_mode: str = "auto", timeout_s: float = 5.0):
+    def __init__(
+        self,
+        socket_path: str,
+        torrent: Optional[str],
+        read_mode: str = "auto",
+        timeout_s: float = 5.0,
+        stat_ttl: float = 10.0,
+        list_ttl: float = 5.0,
+        readdir_prefetch: int = 0,
+        readdir_prefetch_mode: str = "media",
+    ):
         self.socket_path = socket_path
         self.torrent = torrent
         self.read_mode = read_mode
         self.timeout_s = timeout_s
         self._start_time = time.time()
         self._stat_cache: Dict[str, Dict] = {}
-        self._stat_ttl = 10.0  # segundos
+        self._stat_ttl = float(stat_ttl)  # segundos
+        self._list_cache: Dict[str, Dict] = {}
+        self._list_ttl = float(list_ttl)  # segundos
         self._torrents_cache: Dict[str, Dict] = {}
         self._torrents_ttl = 5.0  # segundos
+        self._readdir_prefetch = max(0, int(readdir_prefetch))
+        self._readdir_prefetch_mode = readdir_prefetch_mode
+        self._prefetch_recent: Dict[str, float] = {}
+        self._prefetch_recent_ttl = 30.0  # segundos
 
     # ---------------
     # Helpers
@@ -93,6 +110,19 @@ class TorrentFS(Operations):
         data = dict(stat_obj)
         data["_ts"] = time.time()
         self._stat_cache[key] = data
+
+    def _list_cache_get(self, key: str) -> Optional[list]:
+        item = self._list_cache.get(key)
+        if not item:
+            return None
+        ts = item.get("_ts", 0)
+        if (time.time() - ts) > self._list_ttl:
+            self._list_cache.pop(key, None)
+            return None
+        return item.get("entries", None)
+
+    def _list_cache_set(self, key: str, entries: list) -> None:
+        self._list_cache[key] = {"_ts": time.time(), "entries": entries}
 
     def _make_child_path(self, parent: str, name: str) -> str:
         parent = _clean_path(parent)
@@ -184,6 +214,10 @@ class TorrentFS(Operations):
             return [{"name": t["dir_name"], "type": "dir", "size": 0} for t in self._list_torrents()]
 
         torrent, inner, _ = self._resolve_path(path)
+        list_key = self._cache_key(torrent, inner)
+        cached = self._list_cache_get(list_key)
+        if cached is not None:
+            return cached
         resp, _ = rpc_call_sync(
             self.socket_path,
             {"cmd": "list", "torrent": torrent, "path": inner},
@@ -191,6 +225,7 @@ class TorrentFS(Operations):
         if not resp.get("ok"):
             raise _error_from_resp(resp)
         entries = resp.get("entries", [])
+        self._list_cache_set(list_key, entries)
         # Preenche cache com resultados da listagem.
         for e in entries:
             child_path = self._make_child_path(inner, e["name"])
@@ -274,6 +309,7 @@ class TorrentFS(Operations):
         yield ".."
         for e in entries:
             yield e["name"]
+        self._schedule_readdir_prefetch(path, entries)
 
     def open(self, path: str, flags):
         st = self._stat(path)
@@ -307,6 +343,74 @@ class TorrentFS(Operations):
             "f_ffree": 1023,
             "f_favail": 1023,
         }
+
+    def _is_media_name(self, name: str) -> bool:
+        ext = os.path.splitext(name)[1].lower()
+        return ext in (
+            ".mp4",
+            ".mkv",
+            ".avi",
+            ".mov",
+            ".m4v",
+            ".webm",
+            ".mp3",
+            ".flac",
+            ".aac",
+            ".ogg",
+            ".wav",
+            ".pdf",
+            ".epub",
+            ".cbz",
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".gif",
+        )
+
+    def _schedule_readdir_prefetch(self, path: str, entries: list) -> None:
+        if self._readdir_prefetch <= 0:
+            return
+        if not entries or path in ("", "/") and not self.torrent:
+            return
+
+        def run():
+            count = 0
+            now = time.time()
+            files = [e for e in entries if e.get("type") == "file"]
+            def sort_key(e):
+                name = e.get("name", "")
+                lower = name.lower()
+                is_pdf = lower.endswith(".pdf")
+                is_media = self._is_media_name(name)
+                if is_pdf:
+                    return (0, name)
+                if self._readdir_prefetch_mode == "media" and is_media:
+                    return (1, name)
+                if self._readdir_prefetch_mode == "all":
+                    return (1 if is_media else 2, name)
+                return (2, name)
+
+            files.sort(key=sort_key)
+            for e in files:
+                if count >= self._readdir_prefetch:
+                    break
+                name = e.get("name", "")
+                is_media = self._is_media_name(name)
+                if self._readdir_prefetch_mode == "media" and not is_media:
+                    continue
+                full_path = self._make_child_path(path, name)
+                last = self._prefetch_recent.get(full_path, 0)
+                if (now - last) < self._prefetch_recent_ttl:
+                    continue
+                try:
+                    self._prefetch(full_path)
+                    self._prefetch_recent[full_path] = time.time()
+                    count += 1
+                except Exception:
+                    continue
+
+        threading.Thread(target=run, daemon=True).start()
 
 
 def main():
@@ -345,6 +449,30 @@ def main():
         help="Timeout (segundos) para leitura de pieces; em caso de falta de peers retorna EAGAIN.",
     )
     ap.add_argument(
+        "--stat-ttl",
+        type=float,
+        default=10.0,
+        help="TTL do cache de stat (segundos)",
+    )
+    ap.add_argument(
+        "--list-ttl",
+        type=float,
+        default=5.0,
+        help="TTL do cache de list (segundos)",
+    )
+    ap.add_argument(
+        "--readdir-prefetch",
+        type=int,
+        default=0,
+        help="Prefetch de N arquivos ao listar diretórios (0 = desliga)",
+    )
+    ap.add_argument(
+        "--readdir-prefetch-mode",
+        choices=["media", "all"],
+        default="media",
+        help="Modo do prefetch no readdir",
+    )
+    ap.add_argument(
         "--foreground",
         action="store_true",
         help="Não daemonizar (útil para debug)",
@@ -355,7 +483,16 @@ def main():
     if not os.path.isdir(args.mount):
         raise SystemExit(f"Mountpoint inválido: {args.mount}")
 
-    fs = TorrentFS(args.socket, args.torrent, read_mode=args.mode, timeout_s=args.timeout)
+    fs = TorrentFS(
+        args.socket,
+        args.torrent,
+        read_mode=args.mode,
+        timeout_s=args.timeout,
+        stat_ttl=args.stat_ttl,
+        list_ttl=args.list_ttl,
+        readdir_prefetch=args.readdir_prefetch,
+        readdir_prefetch_mode=args.readdir_prefetch_mode,
+    )
     FUSE(
         fs,
         args.mount,

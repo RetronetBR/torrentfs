@@ -56,6 +56,30 @@ Libtorrent no Windows:
 pipx install .
 ```
 
+## systemd (usuario)
+
+Instala o servico para o usuario atual:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp scripts/systemd/torrentfs.service ~/.config/systemd/user/torrentfs.service
+systemctl --user daemon-reload
+systemctl --user enable --now torrentfs.service
+```
+
+Diretorios usados por padrao:
+- `~/.local/share/torrentfs/torrents`
+- `~/.local/share/torrentfs/cache`
+
+Socket padrao do servico:
+- `$XDG_RUNTIME_DIR/torrentfsd.sock`
+
+Exemplo:
+
+```bash
+torrentfs --socket "$XDG_RUNTIME_DIR/torrentfsd.sock" torrents
+```
+
 ## Instalacao via pacote .deb (futuro)
 
 ```bash
@@ -73,6 +97,7 @@ sudo apt install ./torrentfs_0.1.0_all.deb
 ```bash
 python3 -m venv .venv
 . .venv/bin/activate
+python3 -m pip install -U pip setuptools wheel
 python3 -m pip install -e .
 ```
 

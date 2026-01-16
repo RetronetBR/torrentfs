@@ -1,0 +1,14 @@
+[Unit]
+Description=TorrentFS daemon (user)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/bin/mkdir -p %h/.local/share/torrentfs/torrents %h/.local/share/torrentfs/cache
+ExecStart=/usr/bin/torrentfsd --torrent-dir %h/.local/share/torrentfs/torrents --cache %h/.local/share/torrentfs/cache --socket %t/torrentfsd.sock
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=default.target

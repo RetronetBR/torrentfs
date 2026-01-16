@@ -382,14 +382,18 @@ torrentfs --torrent <id|name> pinned
 
 Pré-requisitos: fuse/fuse3 instalado no sistema, usuário com permissão para montar e `fusepy` instalado (já em `requirements.txt`).
 
-Montar (modo foreground para debug):
+Montar:
 ```bash
-python -m torrentfs_fuse.fs --torrent <id|name> --mount /mnt/torrentfs --mode auto --foreground
+python -m torrentfs_fuse.fs --torrent <id|name> --mount /mnt/torrentfs --mode auto
 ```
 
 Opções úteis:
 - `--allow-other`: permite que outros usuários leiam (requer `user_allow_other` em `/etc/fuse.conf`).
 - `--uid/--gid`: força UID/GID apresentados nos arquivos (default: do usuário que executa ou SUDO_UID/SUDO_GID).
+- `--stat-ttl`: TTL do cache de `stat` (segundos).
+- `--list-ttl`: TTL do cache de `list` (segundos).
+- `--readdir-prefetch`: prefetch de N arquivos ao listar diretórios.
+- `--readdir-prefetch-mode`: `media` ou `all`.
 
 Modo multi-torrent:
 - Se `--torrent` não for informado, o root do mount lista um diretório por torrent carregado.
