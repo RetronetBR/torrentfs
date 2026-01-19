@@ -22,7 +22,7 @@ jobs:
       - name: Install system deps (FUSE)
         run: |
           sudo apt-get update
-          sudo apt-get install -y fuse3 libfuse3-3
+          sudo apt-get install -y fuse3 libfuse3-3 libfuse2
 
       - name: Install Python deps (no libtorrent)
         run: |
