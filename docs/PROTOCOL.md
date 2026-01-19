@@ -43,10 +43,96 @@ Response:
 {"ok":true,"torrents":[{"id":"...","name":"...","torrent_name":"...","cache":"..."}]}
 ```
 
+### config
+Return effective daemon configuration.
+
+Request:
+```json
+{"cmd":"config"}
+```
+Response:
+```json
+{"ok":true,"config":{...}}
+```
+
 ### status
 Request:
 ```json
 {"cmd":"status","torrent":"<id|name>"}
+```
+
+### status-all
+Request:
+```json
+{"cmd":"status-all"}
+```
+Response:
+```json
+{"ok":true,"totals":{...},"torrents":[...]}
+```
+
+### reannounce
+Request:
+```json
+{"cmd":"reannounce","torrent":"<id|name>"}
+```
+
+### reannounce-all
+Request:
+```json
+{"cmd":"reannounce-all"}
+```
+
+### cache-size
+Request:
+```json
+{"cmd":"cache-size"}
+```
+Response:
+```json
+{"ok":true,"logical_bytes":123,"disk_bytes":123}
+```
+
+### prune-cache
+Remove cache entries not referenced by active torrents.
+
+Request:
+```json
+{"cmd":"prune-cache","dry_run":false}
+```
+Response:
+```json
+{"ok":true,"removed":[...],"skipped":[...]}
+```
+
+### downloads
+Request:
+```json
+{"cmd":"downloads","max_files":20}
+```
+Response:
+```json
+{"ok":true,"torrents":[...]}
+```
+
+### peers
+Request:
+```json
+{"cmd":"peers","torrent":"<id|name>"}
+```
+Response:
+```json
+{"ok":true,"peers":[...]}
+```
+
+### peers-all
+Request:
+```json
+{"cmd":"peers-all"}
+```
+Response:
+```json
+{"ok":true,"torrents":[...]}
 ```
 
 ### list
@@ -63,6 +149,26 @@ Response:
 Request:
 ```json
 {"cmd":"stat","torrent":"<id|name>","path":"..."}
+```
+
+### file-info
+Request:
+```json
+{"cmd":"file-info","torrent":"<id|name>","path":"..."}
+```
+Response:
+```json
+{"ok":true,"info":{...}}
+```
+
+### prefetch-info
+Request:
+```json
+{"cmd":"prefetch-info","torrent":"<id|name>","path":"..."}
+```
+Response:
+```json
+{"ok":true,"info":{...}}
 ```
 
 ### read
@@ -82,6 +188,12 @@ Request:
 {"cmd":"pin","torrent":"<id|name>","path":"..."}
 ```
 
+### unpin
+Request:
+```json
+{"cmd":"unpin","torrent":"<id|name>","path":"..."}
+```
+
 ### pinned
 Request:
 ```json
@@ -90,6 +202,12 @@ Request:
 Response:
 ```json
 {"ok":true,"pins":[{"path":"...","file_name":"...","torrent_name":"...","size":123}]}
+```
+
+### prefetch
+Request:
+```json
+{"cmd":"prefetch","torrent":"<id|name>","path":"..."}
 ```
 
 ## Errors

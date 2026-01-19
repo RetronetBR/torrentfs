@@ -17,7 +17,7 @@ Arquivo (ordem de prioridade):
   "max_metadata_mb": 100,
   "skip_check": false,
   "checking": {
-    "max_active": 0
+    "max_active": 1
   },
   "resume": {
     "save_interval_s": 300

@@ -57,7 +57,7 @@ Version: $version
 Section: utils
 Priority: optional
 Architecture: $arch
-Depends: python3 (>= 3.12), python3-libtorrent, libtorrent-rasterbar2.0, fuse3
+Depends: python3 (>= 3.10), python3-libtorrent, libtorrent-rasterbar2.0, fuse3
 Maintainer: TorrentFS <dev@torrentfs.local>
 Description: Read-only P2P filesystem built on BitTorrent.
  TorrentFS provides a read-only filesystem backed by BitTorrent data.
