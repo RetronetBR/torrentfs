@@ -98,6 +98,16 @@ def main():
     sub.add_parser("cache-size", help="Tamanho total do cache")
 
     # -----------------------------
+    # prune-cache
+    # -----------------------------
+    p_prune = sub.add_parser("prune-cache", help="Limpar cache sem referencia ativa")
+    p_prune.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra o que seria removido sem apagar",
+    )
+
+    # -----------------------------
     # add-magnet
     # -----------------------------
     p_add_magnet = sub.add_parser("add-magnet", help="Adicionar magnet e salvar .torrent")
@@ -541,6 +551,25 @@ def main():
             disk = resp.get("disk_bytes", 0)
             print(f"cache_logical: {_fmt_bytes(logical)}")
             print(f"cache_disk: {_fmt_bytes(disk)}")
+            return
+
+        if args.cmd == "prune-cache":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "prune-cache", "dry_run": bool(args.dry_run)},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao limpar cache"))
+                return
+            removed = resp.get("removed", [])
+            skipped = resp.get("skipped", 0)
+            action = "removidos" if not args.dry_run else "candidatos"
+            print(f"{action}: {len(removed)} skipped: {skipped}")
+            for tid in removed:
+                print(f"  {tid}")
             return
 
         if args.cmd == "add-magnet":

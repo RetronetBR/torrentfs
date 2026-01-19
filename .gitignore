@@ -5,6 +5,9 @@ mnt/
 # Python cache/venv
 __pycache__/
 .venv/
+
+# Local context summary
+docs/CONTEXT.md
 *.egg-info/
 dist/
 build/

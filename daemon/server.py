@@ -96,6 +96,18 @@ class TorrentFSServer:
                                 "disk_bytes": sizes["disk"],
                             },
                         )
+                    elif cmd == "prune-cache":
+                        dry_run = bool(req.get("dry_run", False))
+                        data = self.manager.prune_cache(dry_run=dry_run)
+                        await send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": True,
+                                "removed": data["removed"],
+                                "skipped": data["skipped"],
+                            },
+                        )
                     elif cmd == "downloads":
                         max_files = req.get("max_files")
                         if max_files is not None:

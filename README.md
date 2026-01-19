@@ -134,6 +134,18 @@ Cache size:
 torrentfs cache-size
 ```
 
+Prune cache (remove torrents sem referencia ativa):
+
+```bash
+torrentfs prune-cache
+```
+
+Dry-run:
+
+```bash
+torrentfs prune-cache --dry-run
+```
+
 Status:
 
 ```bash

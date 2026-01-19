@@ -319,3 +319,33 @@ class TorrentManager:
                 except OSError:
                     continue
         return {"logical": logical_total, "disk": disk_total}
+
+    def prune_cache(self, dry_run: bool = False) -> dict:
+        with self._lock:
+            active_ids = set(self.engines.keys())
+
+        removed = []
+        skipped = 0
+        try:
+            entries = os.listdir(self.cache_root)
+        except FileNotFoundError:
+            return {"removed": removed, "skipped": skipped}
+
+        for name in entries:
+            path = os.path.join(self.cache_root, name)
+            if not os.path.isdir(path):
+                continue
+            if name in active_ids:
+                continue
+            if len(name) != 12 or any(c not in "0123456789abcdef" for c in name):
+                skipped += 1
+                continue
+            if not dry_run:
+                try:
+                    shutil.rmtree(path, ignore_errors=True)
+                except Exception:
+                    skipped += 1
+                    continue
+            removed.append(name)
+
+        return {"removed": removed, "skipped": skipped}
