@@ -33,12 +33,12 @@ jobs:
             image: rockylinux:9
             python_bin: python3.11
             install_cmd: |
-              dnf -y install python3.11 python3.11-pip python3.11-venv fuse fuse-libs fuse3
+              dnf -y install python3.11 python3.11-pip python3.11-setuptools fuse fuse-libs fuse3
           - name: alma
             image: almalinux:9
             python_bin: python3.11
             install_cmd: |
-              dnf -y install python3.11 python3.11-pip python3.11-venv fuse fuse-libs fuse3
+              dnf -y install python3.11 python3.11-pip python3.11-setuptools fuse fuse-libs fuse3
 
     container:
       image: ${{ matrix.image }}
