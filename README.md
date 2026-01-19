@@ -2,7 +2,7 @@
 
 Read-only P2P filesystem built on BitTorrent.
 
-See `INSTALL.md` for installation instructions.
+See `INSTALL.en.md` or `INSTALL.pt.md` for installation instructions.
 
 ## Config
 
