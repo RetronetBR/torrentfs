@@ -1,7 +1,7 @@
 # Instalacao
 
 Requisitos:
-- Python 3.12
+- Python 3.10 a 3.12
 - libtorrent (biblioteca do sistema)
 - FUSE/fuse3 (para montar)
 
@@ -54,6 +54,12 @@ Libtorrent no Windows:
 
 ```bash
 pipx install .
+```
+
+Se estiver instalando direto do repositorio remoto:
+
+```bash
+pipx install git+<url-do-repo>
 ```
 
 ## systemd (usuario)

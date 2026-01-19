@@ -8,6 +8,8 @@ import os
 import stat
 import sys
 import threading
+import site
+from collections import deque
 import time
 from typing import Dict, Iterable, Optional, Tuple
 
@@ -19,8 +21,32 @@ def _load_fusepy():
     Carrega o módulo externo fusepy (também chamado 'fuse') fora do diretório
     do projeto para evitar colisões com módulos locais.
     """
-    here = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-    alt_paths = [p for p in sys.path if os.path.abspath(p) != here]
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    def _try_import():
+        import fuse as module
+        mod_path = os.path.abspath(getattr(module, "__file__", ""))
+        if mod_path and os.path.abspath(os.path.join(repo_root, "fuse")) not in mod_path:
+            return module
+        return None
+
+    try:
+        module = _try_import()
+        if module:
+            return module
+    except Exception:
+        pass
+
+    user_site = site.getusersitepackages()
+    if user_site and user_site not in sys.path:
+        sys.path.append(user_site)
+        try:
+            module = _try_import()
+            if module:
+                return module
+        except Exception:
+            pass
+
+    alt_paths = [p for p in sys.path if os.path.abspath(p) != repo_root]
     spec = importlib.machinery.PathFinder.find_spec("fuse", alt_paths)
     if spec is None or spec.loader is None:
         raise ImportError("Não foi possível carregar fusepy. Instale com 'pip install fusepy'.")
@@ -92,6 +118,10 @@ class TorrentFS(Operations):
         self._readdir_prefetch_mode = readdir_prefetch_mode
         self._prefetch_recent: Dict[str, float] = {}
         self._prefetch_recent_ttl = 30.0  # segundos
+        self._prefetch_queue = deque()
+        self._prefetch_cond = threading.Condition()
+        self._prefetch_worker_started = False
+        self._prefetch_queue_max = 8
 
     # ---------------
     # Helpers
@@ -183,7 +213,7 @@ class TorrentFS(Operations):
         inner = parts[1] if len(parts) > 1 else ""
         tid = self._torrent_dir_map().get(dir_name)
         if not tid:
-            raise FileNotFoundError(dir_name)
+            raise FuseOSError(errno.ENOENT)
         return tid, inner, inner == ""
 
     def _stat(self, path: str) -> Dict:
@@ -374,10 +404,26 @@ class TorrentFS(Operations):
         if not entries or path in ("", "/") and not self.torrent:
             return
 
-        def run():
+        with self._prefetch_cond:
+            if not self._prefetch_worker_started:
+                threading.Thread(target=self._prefetch_worker, daemon=True).start()
+                self._prefetch_worker_started = True
+            if len(self._prefetch_queue) >= self._prefetch_queue_max:
+                return
+            self._prefetch_queue.append((path, entries))
+            self._prefetch_cond.notify()
+
+    def _prefetch_worker(self) -> None:
+        while True:
+            with self._prefetch_cond:
+                while not self._prefetch_queue:
+                    self._prefetch_cond.wait()
+                path, entries = self._prefetch_queue.popleft()
+
             count = 0
             now = time.time()
             files = [e for e in entries if e.get("type") == "file"]
+
             def sort_key(e):
                 name = e.get("name", "")
                 lower = name.lower()
@@ -409,8 +455,6 @@ class TorrentFS(Operations):
                     count += 1
                 except Exception:
                     continue
-
-        threading.Thread(target=run, daemon=True).start()
 
 
 def main():
