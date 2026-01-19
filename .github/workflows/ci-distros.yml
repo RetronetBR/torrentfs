@@ -1,0 +1,82 @@
+name: CI Distros
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: debian
+            image: debian:bookworm
+            install_cmd: |
+              apt-get update
+              apt-get install -y python3 python3-pip python3-venv fuse3 libfuse3-3 libfuse2
+          - name: ubuntu
+            image: ubuntu:22.04
+            install_cmd: |
+              apt-get update
+              apt-get install -y python3 python3-pip python3-venv fuse3 libfuse3-3 libfuse2
+          - name: fedora
+            image: fedora:39
+            install_cmd: |
+              dnf -y install python3 python3-pip fuse fuse-libs fuse3
+          - name: rocky
+            image: rockylinux:9
+            install_cmd: |
+              dnf -y install python3 python3-pip fuse fuse-libs fuse3
+          - name: alma
+            image: almalinux:9
+            install_cmd: |
+              dnf -y install python3 python3-pip fuse fuse-libs fuse3
+
+    container:
+      image: ${{ matrix.image }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: ${{ matrix.install_cmd }}
+
+      - name: Install Python deps (no libtorrent)
+        run: |
+          python3 -m pip install -U pip
+          python3 -m pip install -e . --no-deps
+          python3 -m pip install fusepy --no-deps
+
+      - name: Smoke CLI
+        run: |
+          python3 -m cli.main --help
+
+      - name: Smoke FUSE
+        run: |
+          python3 -m torrentfs_fuse.fs --help
+
+  arm64-ubuntu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: ARM64 smoke (Ubuntu)
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -v "$PWD":/work -w /work ubuntu:22.04 bash -lc "\
+              apt-get update && \
+              apt-get install -y python3 python3-pip python3-venv fuse3 libfuse3-3 libfuse2 && \
+              python3 -m pip install -U pip && \
+              python3 -m pip install -e . --no-deps && \
+              python3 -m pip install fusepy --no-deps && \
+              python3 -m cli.main --help && \
+              python3 -m torrentfs_fuse.fs --help \
+            "
