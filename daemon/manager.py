@@ -285,6 +285,20 @@ class TorrentManager:
             )
         return {"torrents": torrents}
 
+    def peers_all(self) -> dict:
+        with self._lock:
+            items = list(self.engines.items())
+        torrents = []
+        for tid, eng in items:
+            torrents.append(
+                {
+                    "id": tid,
+                    "status": eng.status(),
+                    "peers": eng.peers(),
+                }
+            )
+        return {"torrents": torrents}
+
     def reannounce_all(self) -> None:
         with self._lock:
             items = list(self.engines.values())

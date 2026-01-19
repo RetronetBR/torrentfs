@@ -152,6 +152,24 @@ Downloads em execucao:
 torrentfs downloads --max-files 20
 ```
 
+Uploads em execucao (peers com transferencia):
+
+```bash
+torrentfs --torrent <id|name> uploads
+```
+
+Todos os peers (sem filtro de transferencia):
+
+```bash
+torrentfs --torrent <id|name> uploads --all
+```
+
+Todos os torrents:
+
+```bash
+torrentfs uploads --all-torrents
+```
+
 Forcar announce (um torrent):
 
 ```bash

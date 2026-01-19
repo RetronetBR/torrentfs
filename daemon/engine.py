@@ -879,6 +879,57 @@ class TorrentEngine:
                     break
             return items
 
+    def peers(self) -> List[dict]:
+        with self._lock:
+            try:
+                peers = list(self.handle.get_peer_info())
+            except Exception:
+                return []
+
+        out = []
+        for p in peers:
+            endpoint = getattr(p, "ip", None)
+            ip_str = ""
+            port = 0
+            if endpoint is not None:
+                if isinstance(endpoint, tuple) and len(endpoint) >= 2:
+                    ip_str = str(endpoint[0])
+                    try:
+                        port = int(endpoint[1])
+                    except Exception:
+                        port = 0
+                else:
+                    try:
+                        ip_str = str(endpoint.address())
+                    except Exception:
+                        ip_str = str(endpoint)
+                    try:
+                        port = int(endpoint.port())
+                    except Exception:
+                        port = 0
+            client = getattr(p, "client", "")
+            if isinstance(client, (bytes, bytearray)):
+                try:
+                    client = client.decode("utf-8", errors="replace")
+                except Exception:
+                    client = str(client)
+            else:
+                client = str(client)
+            out.append(
+                {
+                    "ip": ip_str,
+                    "port": port,
+                    "client": client,
+                    "download_rate": int(getattr(p, "down_speed", 0)),
+                    "upload_rate": int(getattr(p, "up_speed", 0)),
+                    "downloaded": int(getattr(p, "total_download", 0)),
+                    "uploaded": int(getattr(p, "total_upload", 0)),
+                    "progress": float(getattr(p, "progress", 0.0)),
+                    "flags": int(getattr(p, "flags", 0)),
+                }
+            )
+        return out
+
     def reannounce(self) -> None:
         with self._lock:
             try:

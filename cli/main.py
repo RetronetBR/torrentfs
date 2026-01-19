@@ -150,6 +150,21 @@ def main():
     )
 
     # -----------------------------
+    # uploads
+    # -----------------------------
+    p_uploads = sub.add_parser("uploads", help="Listar peers com transferencia ativa")
+    p_uploads.add_argument(
+        "--all",
+        action="store_true",
+        help="Inclui peers sem transferencia ativa",
+    )
+    p_uploads.add_argument(
+        "--all-torrents",
+        action="store_true",
+        help="Lista peers de todos os torrents (ignora --torrent)",
+    )
+
+    # -----------------------------
     # reannounce
     # -----------------------------
     sub.add_parser("reannounce", help="Forcar announce do tracker/DHT")
@@ -356,6 +371,48 @@ def main():
             base = re.sub(r"[\\/:*?\"<>|]+", "_", base)
             base = re.sub(r"\s+", " ", base).strip()
             return base or "torrent"
+
+        def _peer_host(p: dict) -> str:
+            ip = str(p.get("ip", "")).strip()
+            port = int(p.get("port", 0) or 0)
+            if ip and port:
+                return f"{ip}:{port}"
+            return ip or "-"
+
+        def _print_peers_summary(tid: str, name: str, peers: list):
+            active = 0
+            up_rate = 0
+            down_rate = 0
+            for p in peers:
+                up = int(p.get("upload_rate", 0))
+                down = int(p.get("download_rate", 0))
+                if up > 0 or down > 0:
+                    active += 1
+                up_rate += up
+                down_rate += down
+            label = name if name else tid
+            print(
+                f"{label}\tpeers={len(peers)}\tactive={active}\t"
+                f"up={_fmt_rate(up_rate)}\tdown={_fmt_rate(down_rate)}"
+            )
+
+        def _print_peer_line(p: dict):
+            host = _peer_host(p)
+            up = int(p.get("upload_rate", 0))
+            down = int(p.get("download_rate", 0))
+            uploaded = int(p.get("uploaded", 0))
+            downloaded = int(p.get("downloaded", 0))
+            client = p.get("client", "")
+            msg = f"  {host}\tup={_fmt_rate(up)}\tdown={_fmt_rate(down)}"
+            if uploaded > 0 or downloaded > 0:
+                msg += f"\tsent={_fmt_bytes(uploaded)}\trecv={_fmt_bytes(downloaded)}"
+            if client:
+                msg += f"\t{client}"
+            print(msg)
+
+        def _torrent_label_map(torrents: list) -> dict:
+            dir_map = _build_torrent_dir_map(torrents)
+            return {tid: name for name, tid in dir_map.items()}
 
         def _infohash_hex_from_ti(ti) -> str:
             try:
@@ -590,6 +647,45 @@ def main():
                     remaining = f.get("remaining", 0)
                     size = f.get("size", 0)
                     print(f"  file\t{pct:.2f}%\t{remaining}/{size}\t{fpath}")
+            return
+
+        if args.cmd == "uploads" and args.all_torrents:
+            label_map = {}
+            resp_names, _ = await rpc_call(args.socket, {"cmd": "torrents"})
+            if resp_names.get("ok"):
+                label_map = _torrent_label_map(resp_names.get("torrents", []))
+            resp, _ = await rpc_call(args.socket, {"cmd": "peers-all"})
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao obter peers"))
+                return
+            torrents = resp.get("torrents", [])
+            for item in torrents:
+                tid = item.get("id", "")
+                st = item.get("status", {})
+                name = label_map.get(tid, st.get("name", ""))
+                peers = item.get("peers", [])
+                active = sum(
+                    1
+                    for p in peers
+                    if int(p.get("upload_rate", 0)) > 0 or int(p.get("download_rate", 0)) > 0
+                )
+                if not args.all and active == 0:
+                    continue
+                _print_peers_summary(tid, name, peers)
+                peers_sorted = sorted(
+                    peers,
+                    key=lambda p: int(p.get("upload_rate", 0)) + int(p.get("download_rate", 0)),
+                    reverse=True,
+                )
+                for p in peers_sorted:
+                    up = int(p.get("upload_rate", 0))
+                    down = int(p.get("download_rate", 0))
+                    if not args.all and up <= 0 and down <= 0:
+                        continue
+                    _print_peer_line(p)
             return
 
         if args.cmd == "reannounce-all":
@@ -1056,6 +1152,36 @@ def main():
                 _print_ok(f"prefetched: {prefetched} errors: {len(errors)}")
                 for err in errors:
                     _print_error(f"{err.get('path')}: {err.get('error')}")
+
+        elif args.cmd == "uploads":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "peers", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao obter peers"))
+                return
+            peers = resp.get("peers", [])
+            label_map = {}
+            resp_names, _ = await rpc_call(args.socket, {"cmd": "torrents"})
+            if resp_names.get("ok"):
+                label_map = _torrent_label_map(resp_names.get("torrents", []))
+            label = label_map.get(torrent, args.torrent or torrent)
+            _print_peers_summary(torrent, label, peers)
+            peers_sorted = sorted(
+                peers,
+                key=lambda p: int(p.get("upload_rate", 0)) + int(p.get("download_rate", 0)),
+                reverse=True,
+            )
+            for p in peers_sorted:
+                up = int(p.get("upload_rate", 0))
+                down = int(p.get("download_rate", 0))
+                if not args.all and up <= 0 and down <= 0:
+                    continue
+                _print_peer_line(p)
 
         elif args.cmd == "du":
             max_depth = int(args.depth)

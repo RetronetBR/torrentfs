@@ -109,6 +109,16 @@ class TorrentFSServer:
                                 "torrents": data["torrents"],
                             },
                         )
+                    elif cmd == "peers-all":
+                        data = self.manager.peers_all()
+                        await send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": True,
+                                "torrents": data["torrents"],
+                            },
+                        )
 
                     # -----------------------------
                     # Operações por torrent (requer "torrent")
@@ -181,6 +191,13 @@ class TorrentFSServer:
                         await send_json(
                             writer,
                             {"id": req_id, "ok": True, "pins": pins},
+                        )
+                    elif cmd == "peers":
+                        engine = self._get_engine_from_req(req)
+                        peers = engine.peers()
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "peers": peers},
                         )
 
                     elif cmd == "prefetch":
