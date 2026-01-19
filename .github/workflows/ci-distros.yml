@@ -49,7 +49,16 @@ jobs:
       - name: Install system deps
         run: ${{ matrix.install_cmd }}
 
+      - name: Check Python
+        id: check
+        run: |
+          if ! command -v ${{ matrix.python_bin }} >/dev/null 2>&1; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "Python not found: ${{ matrix.python_bin }}"
+          fi
+
       - name: Install Python deps (no libtorrent)
+        if: steps.check.outputs.skip != 'true'
         run: |
           ${{ matrix.python_bin }} -m venv /tmp/venv
           /tmp/venv/bin/python -m pip install -U pip
@@ -57,10 +66,12 @@ jobs:
           /tmp/venv/bin/pip install fusepy --no-deps
 
       - name: Smoke CLI
+        if: steps.check.outputs.skip != 'true'
         run: |
           /tmp/venv/bin/python -m cli.main --help
 
       - name: Smoke FUSE
+        if: steps.check.outputs.skip != 'true'
         run: |
           /tmp/venv/bin/python -m torrentfs_fuse.fs --help
 
