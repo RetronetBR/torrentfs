@@ -65,10 +65,22 @@ def _normalize_path(path: str) -> str:
         return ""
     return path.replace(os.sep, "/")
 
+def _default_socket_path() -> str:
+    env = os.environ.get("TORRENTFSD_SOCKET")
+    if env:
+        return env
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        candidate = os.path.join(runtime_dir, "torrentfsd.sock")
+        if os.path.exists(candidate):
+            return candidate
+        return candidate
+    return "/tmp/torrentfsd.sock"
+
 
 def main():
     ap = argparse.ArgumentParser("torrentfs")
-    ap.add_argument("--socket", default="/tmp/torrentfsd.sock")
+    ap.add_argument("--socket", default=_default_socket_path())
     ap.add_argument("--torrent", help="Nome ou ID do torrent")
     ap.add_argument(
         "--mount",

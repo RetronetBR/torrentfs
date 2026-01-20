@@ -191,6 +191,7 @@ Comandos no PATH quando instalado via pipx:
 - `torrentfs-fuse` (FUSE)
 
 Opcional: use `--socket` para apontar outro socket quando houver mais de um daemon.
+Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se existir), senao `/tmp/torrentfsd.sock`.
 Opcional: use `--mount` para permitir paths do filesystem (ex.: `/mnt/torrentfs/...`) em comandos com `path`.
 Opcional: use `--json` para forcar saida em JSON.
 Opcional: em modo desenvolvimento, use `python -m cli.main` no lugar de `torrentfs`.
