@@ -208,6 +208,12 @@ Add magnet (salva .torrent em `torrents/`):
 torrentfs add-magnet "<magnet:...>"
 ```
 
+Adicionar fonte via plugin (ex.: magnet):
+
+```bash
+torrentfs source-add "magnet:?xt=urn:btih:..."
+```
+
 Show daemon config (effective values):
 
 ```bash

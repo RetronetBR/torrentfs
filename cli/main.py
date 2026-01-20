@@ -14,6 +14,8 @@ except Exception:
     lt = None
 
 from cli.client import rpc_call
+from plugins import get_plugin_for_uri
+from plugins.base import SourceError
 
 
 async def get_default_torrent(socket, explicit=None):
@@ -130,6 +132,23 @@ def main():
         help="Diretorio onde salvar o .torrent (default: torrents)",
     )
     p_add_magnet.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Timeout para baixar metadata (segundos)",
+    )
+
+    # -----------------------------
+    # source-add
+    # -----------------------------
+    p_source = sub.add_parser("source-add", help="Adicionar fonte via plugin")
+    p_source.add_argument("uri")
+    p_source.add_argument(
+        "--dir",
+        default="torrents",
+        help="Diretorio onde salvar o .torrent (default: torrents)",
+    )
+    p_source.add_argument(
         "--timeout",
         type=int,
         default=300,
@@ -467,6 +486,93 @@ def main():
                     out[ih] = path
             return out
 
+        def _save_magnet(magnet: str, out_dir: str, timeout: int):
+            if lt is None:
+                _print_error("libtorrent nao disponivel no ambiente")
+                return None
+            torrent_dir = os.path.abspath(out_dir)
+            os.makedirs(torrent_dir, exist_ok=True)
+
+            try:
+                params = lt.parse_magnet_uri(magnet)
+            except Exception as e:
+                _print_error(f"magnet invalido: {e}")
+                return None
+
+            existing = _existing_infohashes(torrent_dir)
+            infohash = ""
+            try:
+                ih = params.info_hashes
+                if getattr(ih, "has_v1", False) and ih.v1:
+                    infohash = str(ih.v1)
+                elif getattr(ih, "has_v2", False) and ih.v2:
+                    infohash = str(ih.v2)
+            except Exception:
+                pass
+            if infohash and infohash in existing:
+                _print_ok(f"ja existe: {existing[infohash]}")
+                return existing[infohash]
+
+            ses = lt.session()
+            ses.listen_on(6881, 6891)
+            handle = ses.add_torrent(params)
+
+            start = time.time()
+            while not handle.has_metadata():
+                if (time.time() - start) > timeout:
+                    _print_error("timeout aguardando metadata")
+                    return None
+                time.sleep(0.2)
+
+            ti = handle.torrent_file()
+            infohash = _infohash_hex_from_ti(ti)
+            if infohash and infohash in existing:
+                _print_ok(f"ja existe: {existing[infohash]}")
+                return existing[infohash]
+
+            name = getattr(params, "name", "") or ti.name()
+            base = _sanitize_name(name)
+            out_name = f"{base}.torrent"
+            out_path = os.path.join(torrent_dir, out_name)
+            if os.path.exists(out_path):
+                suffix = infohash[:12] if infohash else str(int(time.time()))
+                out_name = f"{base}__{suffix}.torrent"
+                out_path = os.path.join(torrent_dir, out_name)
+
+            try:
+                data = lt.bencode(ti.generate())
+            except Exception as e:
+                _print_error(f"falha ao gerar .torrent: {e}")
+                return None
+
+            with open(out_path, "wb") as f:
+                f.write(data)
+
+            _print_ok(f"salvo: {out_path}")
+            return out_path
+
+        def _handle_source_add(uri: str, out_dir: str, timeout: int):
+            plugin = get_plugin_for_uri(uri)
+            if not plugin:
+                _print_error("nenhum plugin encontrado para a origem")
+                return
+            try:
+                items = plugin.resolve(uri)
+            except SourceError as e:
+                _print_error(str(e))
+                return
+            except Exception as e:
+                _print_error(f"falha ao resolver origem: {e}")
+                return
+            if not items:
+                _print_error("origem sem resultados")
+                return
+            for item in items:
+                if item.kind == "magnet":
+                    _save_magnet(item.value, out_dir, timeout)
+                else:
+                    _print_error(f"tipo nao suportado: {item.kind}")
+
         def _print_status_all(resp):
             if args.json:
                 _print_json(resp)
@@ -585,68 +691,11 @@ def main():
             return
 
         if args.cmd == "add-magnet":
-            if lt is None:
-                _print_error("libtorrent nao disponivel no ambiente")
-                return
-            torrent_dir = os.path.abspath(args.dir)
-            os.makedirs(torrent_dir, exist_ok=True)
+            _save_magnet(args.magnet, args.dir, args.timeout)
+            return
 
-            try:
-                params = lt.parse_magnet_uri(args.magnet)
-            except Exception as e:
-                _print_error(f"magnet invalido: {e}")
-                return
-
-            existing = _existing_infohashes(torrent_dir)
-            infohash = ""
-            try:
-                ih = params.info_hashes
-                if getattr(ih, "has_v1", False) and ih.v1:
-                    infohash = str(ih.v1)
-                elif getattr(ih, "has_v2", False) and ih.v2:
-                    infohash = str(ih.v2)
-            except Exception:
-                pass
-            if infohash and infohash in existing:
-                _print_ok(f"ja existe: {existing[infohash]}")
-                return
-
-            ses = lt.session()
-            ses.listen_on(6881, 6891)
-            handle = ses.add_torrent(params)
-
-            start = time.time()
-            while not handle.has_metadata():
-                if (time.time() - start) > args.timeout:
-                    _print_error("timeout aguardando metadata")
-                    return
-                time.sleep(0.2)
-
-            ti = handle.torrent_file()
-            infohash = _infohash_hex_from_ti(ti)
-            if infohash and infohash in existing:
-                _print_ok(f"ja existe: {existing[infohash]}")
-                return
-
-            name = getattr(params, "name", "") or ti.name()
-            base = _sanitize_name(name)
-            out_name = f"{base}.torrent"
-            out_path = os.path.join(torrent_dir, out_name)
-            if os.path.exists(out_path):
-                suffix = infohash[:12] if infohash else str(int(time.time()))
-                out_name = f"{base}__{suffix}.torrent"
-                out_path = os.path.join(torrent_dir, out_name)
-
-            try:
-                data = lt.bencode(ti.generate())
-            except Exception as e:
-                _print_error(f"falha ao gerar .torrent: {e}")
-                return
-
-            with open(out_path, "wb") as f:
-                f.write(data)
-
-            _print_ok(f"salvo: {out_path}")
+        if args.cmd == "source-add":
+            _handle_source_add(args.uri, args.dir, args.timeout)
             return
 
         if args.cmd == "status-all":
