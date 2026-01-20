@@ -1,13 +1,77 @@
 # TorrentFS
 
-Read-only P2P filesystem built on BitTorrent.
+TorrentFS e um filesystem read-only sobre BitTorrent. O daemon gerencia os torrents
+via libtorrent e expoe um RPC local; a CLI e o cliente FUSE usam esse RPC para
+navegar, ler e fazer prefetch de arquivos enquanto o download acontece.
 
-See `INSTALL.en.md` or `INSTALL.pt.md` for installation instructions.
+Use `INSTALL.en.md` ou `INSTALL.pt.md` para instrucoes de instalacao.
 
-## Raspberry Pi (ARM64)
+## Plataformas suportadas
 
-Ha compatibilidade com Debian em ARM64 (Raspberry Pi). Testes foram executados em ARM64.
+- Linux (Debian/Ubuntu, Arch/Manjaro, Fedora)
+- ARM64 (Raspberry Pi, Debian/Ubuntu): testes realizados em ARM64
+- Outras distros Linux devem funcionar se houver libtorrent e FUSE
+
 Em caso de problemas, reporte para `torrentfs@retronet.com.br`.
+
+## Instalacao
+
+Via pipx (recomendado):
+
+```bash
+pipx install .
+```
+
+Via pacote .deb:
+
+```bash
+sudo apt install ./torrentfs_0.1.30_all.deb
+```
+
+## Uso rapido
+
+### 1) Coloque seus arquivos .torrent
+
+Modo multi-torrent (diretorio monitorado):
+
+```bash
+mkdir -p ~/torrentfs/torrents ~/torrentfs/cache
+cp /caminho/para/*.torrent ~/torrentfs/torrents/
+```
+
+Modo single-torrent (um arquivo .torrent):
+
+```bash
+cp /caminho/para/arquivo.torrent ~/torrentfs/
+```
+
+### 2) Inicie o daemon
+
+Multi-torrent (monitorando diretorio):
+
+```bash
+torrentfsd --torrent-dir ~/torrentfs/torrents --cache ~/torrentfs/cache --socket /tmp/torrentfsd.sock
+```
+
+Single-torrent:
+
+```bash
+torrentfsd --torrent ~/torrentfs/arquivo.torrent --cache ~/torrentfs/cache --socket /tmp/torrentfsd.sock
+```
+
+### 3) Use a CLI
+
+```bash
+torrentfs torrents
+torrentfs --torrent <id|name> ls
+torrentfs --torrent <id|name> cat <path> --offset 0 --size 65536 --mode auto
+```
+
+### 4) Monte via FUSE (opcional)
+
+```bash
+torrentfs-fuse --torrent <id|name> --mount /mnt/torrentfs --mode auto
+```
 
 ## Config
 
