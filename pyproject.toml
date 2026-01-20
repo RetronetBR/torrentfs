@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "torrentfsd"
-version = "0.1.30"
+version = "0.1.31"
 description = "Read-only P2P filesystem built on BitTorrent."
 readme = "README.md"
 license = {file = "LICENSE"}
