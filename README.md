@@ -4,6 +4,11 @@ Read-only P2P filesystem built on BitTorrent.
 
 See `INSTALL.en.md` or `INSTALL.pt.md` for installation instructions.
 
+## Raspberry Pi (ARM64)
+
+Ha compatibilidade com Debian em ARM64 (Raspberry Pi). Testes foram executados em ARM64.
+Em caso de problemas, reporte para `torrentfs@retronet.com.br`.
+
 ## Config
 
 Arquivo (ordem de prioridade):

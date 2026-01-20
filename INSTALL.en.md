@@ -35,6 +35,8 @@ brew install python libtorrent-rasterbar macfuse
 Notes:
 - On Linux, to allow `--allow-other`, enable `user_allow_other` in `/etc/fuse.conf`.
 - Config is read in: `$TORRENTFSD_CONFIG`, `$HOME/.config/torrentfs/torrentfsd.json`, `/etc/torrentfs/torrentfsd.json`.
+ - Raspberry Pi (ARM64) is compatible with Debian-based systems; tests ran on ARM64.
+   If you hit issues, report to `torrentfs@retronet.com.br`.
 
 Linux references:
 - FUSE: https://github.com/libfuse/libfuse
