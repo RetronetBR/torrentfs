@@ -38,6 +38,12 @@ systemctl --user daemon-reload
 systemctl --user enable --now torrentfs.service
 ```
 
+Para parar o servico:
+
+```bash
+systemctl --user stop torrentfs.service
+```
+
 Socket padrao do servico:
 
 ```bash
@@ -106,6 +112,13 @@ Arquivo (ordem de prioridade):
   },
   "resume": {
     "save_interval_s": 300
+  },
+  "trackers": {
+    "aliases": {
+      "torrentfs://bootstrap": [
+        "udp://tracker.retronet.org:6969/announce"
+      ]
+    }
   },
   "prefetch": {
     "on_start": false,
@@ -191,7 +204,7 @@ Comandos no PATH quando instalado via pipx:
 - `torrentfs-fuse` (FUSE)
 
 Opcional: use `--socket` para apontar outro socket quando houver mais de um daemon.
-Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se existir), senao `/tmp/torrentfsd.sock`.
+Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se existir), com fallback para `/tmp/torrentfsd.sock` se o socket nao responder.
 Opcional: use `--mount` para permitir paths do filesystem (ex.: `/mnt/torrentfs/...`) em comandos com `path`.
 Opcional: use `--json` para forcar saida em JSON.
 Opcional: em modo desenvolvimento, use `python -m cli.main` no lugar de `torrentfs`.
@@ -212,6 +225,13 @@ Adicionar fonte via plugin (ex.: magnet):
 
 ```bash
 torrentfs source-add "magnet:?xt=urn:btih:..."
+```
+
+Adicionar fonte do archive.org (ID ou URL):
+
+```bash
+torrentfs source-add "archive:revistasabereletronica089fev1980"
+torrentfs source-add "https://archive.org/details/revistasabereletronica089fev1980"
 ```
 
 Show daemon config (effective values):

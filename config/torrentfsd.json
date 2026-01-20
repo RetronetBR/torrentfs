@@ -7,6 +7,9 @@
   "resume": {
     "save_interval_s": 300
   },
+  "trackers": {
+    "aliases": {}
+  },
   "prefetch": {
     "on_start": false,
     "on_start_mode": "media",

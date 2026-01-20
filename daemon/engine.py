@@ -79,6 +79,24 @@ def _get_cfg(cfg: dict, path: str, default):
     return cur
 
 
+def _resolve_tracker_aliases(cfg: dict) -> dict:
+    aliases = _get_cfg(cfg, "trackers.aliases", {}) or {}
+    if not isinstance(aliases, dict):
+        return {}
+    out = {}
+    for key, value in aliases.items():
+        if not isinstance(key, str):
+            continue
+        if isinstance(value, str):
+            items = [value]
+        elif isinstance(value, list):
+            items = [v for v in value if isinstance(v, str)]
+        else:
+            continue
+        out[key] = [v.strip() for v in items if v.strip()]
+    return out
+
+
 def _resolve_max_metadata(cfg: dict) -> int:
     max_metadata = DEFAULT_MAX_METADATA_BYTES
     mb_value = _parse_size_mb(cfg.get("max_metadata_mb"))
@@ -377,6 +395,7 @@ class TorrentEngine:
         self._prefetch_cfg = _load_prefetch_cfg(cfg)
         self._media_exts = set(_load_media_exts(cfg))
         self._prefetch_max_bytes = _resolve_prefetch_max_bytes(cfg)
+        self._tracker_aliases = _resolve_tracker_aliases(cfg)
         self._skip_check = bool(cfg.get("skip_check")) if skip_check is None else bool(skip_check)
         self._resume_save_interval_s = int(_get_cfg(cfg, "resume.save_interval_s", 300) or 0)
         self._resume_path = os.path.join(self.cache_dir, ".resume_data")
@@ -402,6 +421,7 @@ class TorrentEngine:
         if resume_data:
             params["resume_data"] = resume_data
         self.handle = self.ses.add_torrent(params)
+        self._apply_tracker_aliases()
 
         # Prioridades: começa com tudo 0
         for i in range(self.info.num_files()):
@@ -420,6 +440,49 @@ class TorrentEngine:
     # -----------------------------
     # Utilidades
     # -----------------------------
+    def _apply_tracker_aliases(self) -> None:
+        if not self._tracker_aliases:
+            return
+        try:
+            entries = list(self.info.trackers())
+        except Exception:
+            return
+        resolved = []
+        changed = False
+        for entry in entries:
+            url = getattr(entry, "url", None)
+            tier = getattr(entry, "tier", None)
+            if not url:
+                continue
+            if isinstance(url, bytes):
+                url = url.decode("utf-8", "ignore")
+            if url in self._tracker_aliases:
+                changed = True
+                for real in self._tracker_aliases.get(url, []):
+                    try:
+                        ae = lt.announce_entry(real)
+                        if tier is not None:
+                            ae.tier = tier
+                        resolved.append(ae)
+                    except Exception:
+                        continue
+                continue
+            resolved.append(entry)
+        if not changed:
+            return
+        try:
+            self.handle.replace_trackers(resolved)
+        except Exception:
+            try:
+                for entry in resolved:
+                    self.handle.add_tracker(entry)
+            except Exception:
+                return
+        try:
+            resolved_urls = [getattr(e, "url", "") for e in resolved]
+            print(f"[torrentfs] trackers resolvidos: {resolved_urls}")
+        except Exception:
+            pass
     def _real_path(self, file_index: int) -> str:
         rel = self.info.files().file_path(file_index)
         return os.path.join(self.cache_dir, rel)
