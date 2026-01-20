@@ -70,14 +70,15 @@ Install the service for the current user:
 
 ```bash
 mkdir -p ~/.config/systemd/user
+mkdir -p ~/torrentfs/torrents ~/torrentfs/cache
 cp scripts/systemd/torrentfs.service ~/.config/systemd/user/torrentfs.service
 systemctl --user daemon-reload
 systemctl --user enable --now torrentfs.service
 ```
 
 Default directories:
-- `~/.local/share/torrentfs/torrents`
-- `~/.local/share/torrentfs/cache`
+- `~/torrentfs/torrents`
+- `~/torrentfs/cache`
 
 Default socket:
 - `$XDG_RUNTIME_DIR/torrentfsd.sock`

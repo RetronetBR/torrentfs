@@ -70,14 +70,15 @@ Instala o servico para o usuario atual:
 
 ```bash
 mkdir -p ~/.config/systemd/user
+mkdir -p ~/torrentfs/torrents ~/torrentfs/cache
 cp scripts/systemd/torrentfs.service ~/.config/systemd/user/torrentfs.service
 systemctl --user daemon-reload
 systemctl --user enable --now torrentfs.service
 ```
 
 Diretorios usados por padrao:
-- `~/.local/share/torrentfs/torrents`
-- `~/.local/share/torrentfs/cache`
+- `~/torrentfs/torrents`
+- `~/torrentfs/cache`
 
 Socket padrao do servico:
 - `$XDG_RUNTIME_DIR/torrentfsd.sock`

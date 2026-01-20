@@ -28,6 +28,22 @@ Via pacote .deb:
 sudo apt install ./torrentfs_0.1.30_all.deb
 ```
 
+### systemd (usuario) apos instalar o .deb
+
+```bash
+mkdir -p ~/torrentfs/torrents ~/torrentfs/cache
+mkdir -p ~/.config/systemd/user
+cp /opt/torrentfs/scripts/systemd/torrentfs.service ~/.config/systemd/user/torrentfs.service
+systemctl --user daemon-reload
+systemctl --user enable --now torrentfs.service
+```
+
+Socket padrao do servico:
+
+```bash
+${XDG_RUNTIME_DIR}/torrentfsd.sock
+```
+
 ## Uso rapido
 
 ### 1) Coloque seus arquivos .torrent
