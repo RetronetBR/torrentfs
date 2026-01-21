@@ -19,7 +19,39 @@ except Exception:
 from cli.client import rpc_call
 from plugins import get_plugin_for_uri
 from plugins.base import SourceError
-from daemon.engine import get_effective_config
+
+DEFAULT_CONFIG_PATH = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), os.pardir, "config", "torrentfsd.json")
+)
+SYSTEM_CONFIG_PATH = "/etc/torrentfs/torrentfsd.json"
+
+
+def _find_config_path() -> str:
+    env = os.environ.get("TORRENTFSD_CONFIG")
+    if env:
+        return env
+    user_path = os.path.join(os.path.expanduser("~"), ".config", "torrentfs", "torrentfsd.json")
+    if os.path.exists(user_path):
+        return user_path
+    if os.path.exists(SYSTEM_CONFIG_PATH):
+        return SYSTEM_CONFIG_PATH
+    return DEFAULT_CONFIG_PATH
+
+
+def _load_trackers_from_config() -> list[str]:
+    path = _find_config_path()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return []
+    trackers = data.get("trackers", {}) if isinstance(data, dict) else {}
+    add = trackers.get("add", [])
+    if isinstance(add, str):
+        return [add]
+    if isinstance(add, list):
+        return [x for x in add if isinstance(x, str)]
+    return []
 
 
 async def get_default_torrent(socket, explicit=None):
@@ -1422,8 +1454,8 @@ def main():
                 return
             tracker = args.tracker
             if not tracker:
-                cfg = get_effective_config()
-                tracker = (cfg.get("trackers", {}).get("add") or [None])[0]
+                add_list = _load_trackers_from_config()
+                tracker = add_list[0] if add_list else None
             if not tracker:
                 _print_error("tracker nao configurado (use --tracker ou trackers.add)")
                 return
