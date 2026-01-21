@@ -106,6 +106,7 @@ def main():
     # -----------------------------
     # Sobe o servidor RPC
     # -----------------------------
+    print(f"[torrentfs] socket: {args.socket}")
     run_server(manager, args.socket)
 
 

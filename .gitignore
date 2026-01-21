@@ -9,6 +9,7 @@ __pycache__/
 # Local context summary
 docs/CONTEXT.md
 AGENTS.md
+docs/ARCHIVE_DRAFT.md
 *.egg-info/
 dist/
 build/
