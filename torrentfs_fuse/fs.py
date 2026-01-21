@@ -4,6 +4,7 @@ import argparse
 import errno
 import importlib.machinery
 import importlib.util
+import json
 import os
 import stat
 import sys
@@ -87,7 +88,61 @@ def _error_from_resp(resp: dict) -> FuseOSError:
     return FuseOSError(errno.EIO)
 
 
+def _aliases_path() -> str:
+    env = os.environ.get("TORRENTFS_ALIASES")
+    if env:
+        return env
+    home = os.path.expanduser("~")
+    return os.path.join(home, ".config", "torrentfs", "aliases.json")
+
+
+def _load_aliases() -> dict:
+    path = _aliases_path()
+    mtime = 0.0
+    try:
+        mtime = os.path.getmtime(path)
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for key, val in data.items():
+        if not isinstance(key, str) or not isinstance(val, str):
+            continue
+        label = val.strip()
+        if label:
+            out[key] = label
+    out["_mtime"] = mtime
+    return out
+
+
+def _sanitize_dir_name(value: str) -> str:
+    if not value:
+        return ""
+    return value.replace("/", "_").strip()
+
+
+def _is_archive_torrent(tname: str, name: str) -> bool:
+    tname = str(tname or "")
+    lname = tname.lower()
+    if "archive.org" in lname:
+        return True
+    if lname.endswith("_archive.torrent") or lname.endswith("_archive.torrent.torrent"):
+        return True
+    base = os.path.splitext(tname)[0].lower() if tname else str(name or "").lower()
+    if "_archive" in base:
+        return True
+    if base.endswith("_archive"):
+        return True
+    return False
+
+
 class TorrentFS(Operations):
+    _ARCHIVE_GROUP = "Archive.org"
     """
     FUSE read-only mapeando operações para o RPC do daemon.
     """
@@ -114,6 +169,8 @@ class TorrentFS(Operations):
         self._list_ttl = float(list_ttl)  # segundos
         self._torrents_cache: Dict[str, Dict] = {}
         self._torrents_ttl = 5.0  # segundos
+        self._aliases_cache: Dict[str, Dict] = {}
+        self._aliases_ttl = 5.0  # segundos
         self._readdir_prefetch = max(0, int(readdir_prefetch))
         self._readdir_prefetch_mode = readdir_prefetch_mode
         self._prefetch_recent: Dict[str, float] = {}
@@ -168,7 +225,12 @@ class TorrentFS(Operations):
         cached = self._torrents_cache.get("list")
         if cached:
             ts = cached.get("_ts", 0)
-            if (time.time() - ts) <= self._torrents_ttl:
+            aliases_mtime = cached.get("_aliases_mtime", 0)
+            try:
+                current_mtime = os.path.getmtime(_aliases_path())
+            except Exception:
+                current_mtime = 0
+            if (time.time() - ts) <= self._torrents_ttl and current_mtime <= aliases_mtime:
                 return cached["items"]
 
         resp, _ = rpc_call_sync(self.socket_path, {"cmd": "torrents"})
@@ -176,10 +238,22 @@ class TorrentFS(Operations):
             raise _error_from_resp(resp)
 
         torrents = resp.get("torrents", [])
+        aliases = self._aliases_cache.get("items")
+        ts = self._aliases_cache.get("_ts", 0)
+        if not aliases or (time.time() - ts) > self._aliases_ttl:
+            aliases = _load_aliases()
+            self._aliases_cache = {"_ts": time.time(), "items": aliases}
+        if isinstance(aliases, dict):
+            aliases = {k: v for k, v in aliases.items() if k != "_mtime"}
         name_counts: Dict[str, int] = {}
         for t in torrents:
             tname = str(t.get("torrent_name", ""))
-            base = os.path.splitext(tname)[0] if tname else str(t.get("name", ""))
+            tid = str(t.get("id", ""))
+            alias = _sanitize_dir_name(aliases.get(tid, ""))
+            if alias:
+                base = alias
+            else:
+                base = os.path.splitext(tname)[0] if tname else str(t.get("name", ""))
             name_counts[base] = name_counts.get(base, 0) + 1
 
         mapped = []
@@ -187,18 +261,39 @@ class TorrentFS(Operations):
             tid = str(t.get("id", ""))
             name = str(t.get("name", tid))
             tname = str(t.get("torrent_name", ""))
-            base = os.path.splitext(tname)[0] if tname else name
+            alias = _sanitize_dir_name(aliases.get(tid, ""))
+            if alias:
+                base = alias
+            else:
+                base = os.path.splitext(tname)[0] if tname else name
             if name_counts.get(base, 0) <= 1:
                 dir_name = base
             else:
                 dir_name = f"{base}__{tid}"
-            mapped.append({"id": tid, "name": name, "torrent_name": tname, "dir_name": dir_name})
+            group = self._ARCHIVE_GROUP if _is_archive_torrent(tname, name) else ""
+            mapped.append(
+                {
+                    "id": tid,
+                    "name": name,
+                    "torrent_name": tname,
+                    "dir_name": dir_name,
+                    "group": group,
+                }
+            )
 
-        self._torrents_cache["list"] = {"_ts": time.time(), "items": mapped}
+        aliases_mtime = float(aliases.get("_mtime", 0)) if isinstance(aliases, dict) else 0
+        self._torrents_cache["list"] = {"_ts": time.time(), "items": mapped, "_aliases_mtime": aliases_mtime}
         return mapped
 
-    def _torrent_dir_map(self) -> Dict[str, str]:
-        return {t["dir_name"]: t["id"] for t in self._list_torrents()}
+    def _torrent_dir_map(self, group: Optional[str] = None) -> Dict[str, str]:
+        out = {}
+        for t in self._list_torrents():
+            if group and t.get("group") != group:
+                continue
+            if not group and t.get("group"):
+                continue
+            out[t["dir_name"]] = t["id"]
+        return out
 
     def _resolve_path(self, path: str) -> Tuple[Optional[str], str, bool]:
         clean = _clean_path(path)
@@ -207,6 +302,18 @@ class TorrentFS(Operations):
 
         if clean == "":
             return None, "", True
+
+        if clean == self._ARCHIVE_GROUP:
+            return None, self._ARCHIVE_GROUP, True
+
+        if clean.startswith(f"{self._ARCHIVE_GROUP}/"):
+            parts = clean.split("/", 2)
+            dir_name = parts[1] if len(parts) > 1 else ""
+            inner = parts[2] if len(parts) > 2 else ""
+            tid = self._torrent_dir_map(group=self._ARCHIVE_GROUP).get(dir_name)
+            if not tid:
+                raise FuseOSError(errno.ENOENT)
+            return tid, inner, inner == ""
 
         parts = clean.split("/", 1)
         dir_name = parts[0]
@@ -240,8 +347,18 @@ class TorrentFS(Operations):
         return st
 
     def _list(self, path: str):
-        if not self.torrent and path in ("", "/"):
-            return [{"name": t["dir_name"], "type": "dir", "size": 0} for t in self._list_torrents()]
+        clean = _clean_path(path)
+        if not self.torrent and clean == "":
+            items = self._list_torrents()
+            entries = [{"name": t["dir_name"], "type": "dir", "size": 0} for t in items if not t.get("group")]
+            has_archive = any(t.get("group") == self._ARCHIVE_GROUP for t in items)
+            if has_archive:
+                entries.append({"name": self._ARCHIVE_GROUP, "type": "dir", "size": 0})
+            return entries
+
+        if not self.torrent and clean == self._ARCHIVE_GROUP:
+            items = [t for t in self._list_torrents() if t.get("group") == self._ARCHIVE_GROUP]
+            return [{"name": t["dir_name"], "type": "dir", "size": 0} for t in items]
 
         torrent, inner, _ = self._resolve_path(path)
         list_key = self._cache_key(torrent, inner)

@@ -7,6 +7,17 @@
   "resume": {
     "save_interval_s": 300
   },
+  "trackers": {
+    "enable": true,
+    "add": [
+      "udp://tracker.retronet.com.br:6969/announce"
+    ],
+    "aliases": {
+      "torrentfs://bootstrap": [
+        "udp://tracker.retronet.com.br:6969/announce"
+      ]
+    }
+  },
   "prefetch": {
     "on_start": false,
     "on_start_mode": "media",

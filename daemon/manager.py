@@ -182,6 +182,29 @@ class TorrentManager:
             pass
         return True
 
+    def remove_torrent_by_id(self, tid: str) -> bool:
+        with self._lock:
+            engine = self.engines.pop(tid, None)
+            if engine is None:
+                return False
+            name = engine.info.name()
+            ids = self.by_name.get(name, [])
+            if tid in ids:
+                ids.remove(tid)
+                if not ids:
+                    self.by_name.pop(name, None)
+                else:
+                    self.by_name[name] = ids
+        try:
+            engine.shutdown()
+        except Exception:
+            pass
+        try:
+            shutil.rmtree(engine.cache_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return True
+
     def _walk_files(self, engine: TorrentEngine, path: str = "", dir_count: Optional[List[int]] = None) -> Iterable[str]:
         if dir_count is None:
             dir_count = [0]

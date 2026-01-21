@@ -3,8 +3,27 @@ import asyncio
 import uuid
 from common.rpc import send_json, recv_json, recv_bytes
 
+
+async def _open_socket(sock):
+    return await asyncio.open_unix_connection(sock)
+
+
 async def rpc_call(sock, payload, want_bytes=False):
-    reader, writer = await asyncio.open_unix_connection(sock)
+    sockets = sock if isinstance(sock, (list, tuple)) else [sock]
+    last_err = None
+    reader = writer = None
+    for candidate in sockets:
+        try:
+            reader, writer = await _open_socket(candidate)
+            last_err = None
+            break
+        except (FileNotFoundError, ConnectionRefusedError) as e:
+            last_err = e
+            continue
+    if last_err is not None:
+        raise last_err
+    if reader is None or writer is None:
+        raise ConnectionError("SocketUnavailable")
     payload["id"] = payload.get("id", uuid.uuid4().hex)
 
     await send_json(writer, payload)

@@ -96,6 +96,13 @@ class TorrentFSServer:
                                 "disk_bytes": sizes["disk"],
                             },
                         )
+                    elif cmd == "remove-torrent":
+                        tid = req.get("torrent", "")
+                        removed = self.manager.remove_torrent_by_id(str(tid))
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": bool(removed)},
+                        )
                     elif cmd == "prune-cache":
                         dry_run = bool(req.get("dry_run", False))
                         data = self.manager.prune_cache(dry_run=dry_run)
@@ -167,6 +174,22 @@ class TorrentFSServer:
                             {"id": req_id, "ok": True, "info": info},
                         )
 
+                    elif cmd == "infohash":
+                        engine = self._get_engine_from_req(req)
+                        info = engine.infohash()
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "info": info},
+                        )
+
+                    elif cmd == "torrent-info":
+                        engine = self._get_engine_from_req(req)
+                        info = engine.torrent_info_summary()
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "info": info},
+                        )
+
                     elif cmd == "list":
                         engine = self._get_engine_from_req(req)
                         path = req.get("path", "")
@@ -217,6 +240,20 @@ class TorrentFSServer:
                         path = req["path"]
                         engine.prefetch(path)
                         await send_json(writer, {"id": req_id, "ok": True})
+
+                    elif cmd == "add-tracker":
+                        engine = self._get_engine_from_req(req)
+                        trackers = req.get("trackers")
+                        data = engine.add_trackers(trackers)
+                        await send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": True,
+                                "added": data.get("added", []),
+                                "skipped": data.get("skipped", []),
+                            },
+                        )
 
                     elif cmd == "read":
                         engine = self._get_engine_from_req(req)

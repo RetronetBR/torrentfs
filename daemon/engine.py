@@ -7,6 +7,9 @@ import time
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Any
+import binascii
+import datetime
+import urllib.parse
 
 import libtorrent as lt
 
@@ -77,6 +80,40 @@ def _get_cfg(cfg: dict, path: str, default):
             return default
         cur = cur[key]
     return cur
+
+
+def _resolve_tracker_aliases(cfg: dict) -> dict:
+    aliases = _get_cfg(cfg, "trackers.aliases", {}) or {}
+    if not isinstance(aliases, dict):
+        return {}
+    out = {}
+    for key, value in aliases.items():
+        if not isinstance(key, str):
+            continue
+        if isinstance(value, str):
+            items = [value]
+        elif isinstance(value, list):
+            items = [v for v in value if isinstance(v, str)]
+        else:
+            continue
+        out[key] = [v.strip() for v in items if v.strip()]
+    return out
+
+
+def _resolve_tracker_add(cfg: dict) -> list[str]:
+    items = _get_cfg(cfg, "trackers.add", []) or []
+    if isinstance(items, str):
+        items = [items]
+    if not isinstance(items, list):
+        return []
+    out = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        val = item.strip()
+        if val:
+            out.append(val)
+    return out
 
 
 def _resolve_max_metadata(cfg: dict) -> int:
@@ -160,6 +197,11 @@ def get_effective_config() -> dict:
         "max_metadata_bytes": _resolve_max_metadata(cfg),
         "prefetch": _load_prefetch_cfg(cfg),
         "media_extensions": _load_media_exts(cfg),
+        "trackers": {
+            "enable": bool(_get_cfg(cfg, "trackers.enable", True)),
+            "add": _resolve_tracker_add(cfg),
+            "aliases": _resolve_tracker_aliases(cfg),
+        },
         "prefetch_on_start": bool(_get_cfg(cfg, "prefetch.on_start", False)),
         "prefetch_on_start_mode": _get_cfg(cfg, "prefetch.on_start_mode", "media"),
         "prefetch_max_files": int(_get_cfg(cfg, "prefetch.max_files", 0) or 0),
@@ -377,6 +419,13 @@ class TorrentEngine:
         self._prefetch_cfg = _load_prefetch_cfg(cfg)
         self._media_exts = set(_load_media_exts(cfg))
         self._prefetch_max_bytes = _resolve_prefetch_max_bytes(cfg)
+        self._tracker_enabled = bool(_get_cfg(cfg, "trackers.enable", True))
+        if self._tracker_enabled:
+            self._tracker_aliases = _resolve_tracker_aliases(cfg)
+            self._tracker_add = _resolve_tracker_add(cfg)
+        else:
+            self._tracker_aliases = {}
+            self._tracker_add = []
         self._skip_check = bool(cfg.get("skip_check")) if skip_check is None else bool(skip_check)
         self._resume_save_interval_s = int(_get_cfg(cfg, "resume.save_interval_s", 300) or 0)
         self._resume_path = os.path.join(self.cache_dir, ".resume_data")
@@ -402,6 +451,7 @@ class TorrentEngine:
         if resume_data:
             params["resume_data"] = resume_data
         self.handle = self.ses.add_torrent(params)
+        self._apply_tracker_aliases()
 
         # Prioridades: começa com tudo 0
         for i in range(self.info.num_files()):
@@ -420,6 +470,108 @@ class TorrentEngine:
     # -----------------------------
     # Utilidades
     # -----------------------------
+    def _apply_tracker_aliases(self) -> None:
+        if not self._tracker_aliases:
+            return
+        try:
+            entries = list(self.info.trackers())
+        except Exception:
+            return
+        resolved = []
+        changed = False
+        for entry in entries:
+            url = getattr(entry, "url", None)
+            tier = getattr(entry, "tier", None)
+            if not url:
+                continue
+            if isinstance(url, bytes):
+                url = url.decode("utf-8", "ignore")
+            if url in self._tracker_aliases:
+                changed = True
+                for real in self._tracker_aliases.get(url, []):
+                    try:
+                        ae = lt.announce_entry(real)
+                        if tier is not None:
+                            ae.tier = tier
+                        resolved.append(ae)
+                    except Exception:
+                        continue
+                continue
+            resolved.append(entry)
+        existing_urls = {getattr(e, "url", "") for e in resolved}
+        for extra in self._tracker_add:
+            if extra in existing_urls:
+                continue
+            try:
+                resolved.append(lt.announce_entry(extra))
+                changed = True
+            except Exception:
+                continue
+        if not changed:
+            return
+        try:
+            self.handle.replace_trackers(resolved)
+        except Exception:
+            try:
+                for entry in resolved:
+                    self.handle.add_tracker(entry)
+            except Exception:
+                return
+        try:
+            resolved_urls = [getattr(e, "url", "") for e in resolved]
+            print(f"[torrentfs] trackers resolvidos: {resolved_urls}")
+        except Exception:
+            pass
+
+    def add_trackers(self, trackers: Optional[List[str]] = None) -> dict:
+        if not self._tracker_enabled:
+            return {"added": [], "skipped": ["trackers_disabled"]}
+
+        if _is_private_torrent(self.info):
+            return {"added": [], "skipped": ["private_torrent"]}
+
+        if not trackers:
+            trackers = list(self._tracker_add or [])
+        if not trackers:
+            return {"added": [], "skipped": ["no_trackers"]}
+
+        expanded = []
+        skipped = []
+        for item in trackers:
+            if not item:
+                continue
+            if item in self._tracker_aliases:
+                expanded.extend(self._tracker_aliases[item])
+                continue
+            if item.startswith("torrentfs://"):
+                skipped.append(item)
+                continue
+            expanded.append(item)
+
+        added = []
+        existing_urls = set()
+        try:
+            existing_urls = {getattr(e, "url", "") for e in self.handle.trackers()}
+        except Exception:
+            existing_urls = set()
+        for url in expanded:
+            if url in existing_urls:
+                skipped.append(f"{url} (already_present)")
+                continue
+            try:
+                _add_tracker_url(self.handle, url)
+                added.append(url)
+            except Exception as e:
+                msg = str(e) or type(e).__name__
+                skipped.append(f"{url} ({msg})")
+        if added:
+            try:
+                self.handle.force_reannounce()
+            except Exception:
+                pass
+        return {"added": added, "skipped": skipped}
+
+
     def _real_path(self, file_index: int) -> str:
         rel = self.info.files().file_path(file_index)
         return os.path.join(self.cache_dir, rel)
@@ -1009,3 +1161,134 @@ class TorrentEngine:
             "resume_save_interval_s": self._resume_save_interval_s,
             "checking_max_active": self._checking_max_active,
         }
+
+    def infohash(self) -> dict:
+        v1_hex = ""
+        v2_hex = ""
+        try:
+            ih = self.info.info_hashes()
+            if getattr(ih, "has_v1", False) and ih.v1:
+                v1_hex = str(ih.v1)
+            if getattr(ih, "has_v2", False) and ih.v2:
+                v2_hex = str(ih.v2)
+        except Exception:
+            try:
+                v1_hex = str(self.info.info_hash())
+            except Exception:
+                pass
+        v1_url = ""
+        if v1_hex:
+            try:
+                raw = binascii.unhexlify(v1_hex)
+                v1_url = "".join(f"%{b:02x}" for b in raw)
+            except Exception:
+                v1_url = ""
+        return {"v1_hex": v1_hex, "v1_urlencoded": v1_url, "v2_hex": v2_hex}
+
+    def torrent_info_summary(self) -> dict:
+        info = self.info
+        name = ""
+        comment = ""
+        creator = ""
+        creation_date = 0
+        try:
+            name = info.name()
+        except Exception:
+            pass
+        try:
+            comment = info.comment()
+        except Exception:
+            pass
+        try:
+            creator = info.creator()
+        except Exception:
+            pass
+        try:
+            creation_date = int(info.creation_date())
+        except Exception:
+            creation_date = 0
+        try:
+            piece_length = int(info.piece_length())
+        except Exception:
+            piece_length = 0
+        try:
+            total_size = int(info.total_size())
+        except Exception:
+            total_size = 0
+        try:
+            num_pieces = int(info.num_pieces())
+        except Exception:
+            num_pieces = 0
+
+        trackers = []
+        try:
+            trackers = [t.url for t in info.trackers()]
+        except Exception:
+            trackers = []
+
+        hashes = self.infohash()
+        v1_hex = hashes.get("v1_hex", "")
+        magnet = _build_magnet(v1_hex, name, trackers)
+        created_str = ""
+        if creation_date:
+            try:
+                created_str = datetime.datetime.utcfromtimestamp(creation_date).strftime(
+                    "%a, %d %b %Y %H:%M:%S GMT"
+                )
+            except Exception:
+                created_str = ""
+
+        mode = "single" if info.num_files() <= 1 else "multi"
+
+        return {
+            "name": name,
+            "comment": comment,
+            "created_by": creator,
+            "creation_date": creation_date,
+            "creation_date_str": created_str,
+            "piece_length": piece_length,
+            "num_pieces": num_pieces,
+            "total_size": total_size,
+            "mode": mode,
+            "trackers": trackers,
+            "infohash": v1_hex,
+            "magnet": magnet,
+        }
+
+
+def _is_private_torrent(info: lt.torrent_info) -> bool:
+    try:
+        return bool(info.priv())
+    except Exception:
+        pass
+    try:
+        return bool(info.private())
+    except Exception:
+        pass
+    return False
+
+
+def _add_tracker_url(handle: lt.torrent_handle, url: str) -> None:
+    try:
+        handle.add_tracker({"url": url})
+        return
+    except Exception:
+        pass
+    entry = lt.announce_entry(url)
+    handle.add_tracker(entry)
+
+
+def _build_magnet(infohash: str, name: str, trackers: list[str]) -> str:
+    if not infohash:
+        return ""
+    params = {
+        "xt": f"urn:btih:{infohash}",
+    }
+    if name:
+        params["dn"] = name
+    query = []
+    for key, value in params.items():
+        query.append(f"{key}={urllib.parse.quote(value)}")
+    for tr in trackers:
+        query.append(f"tr={urllib.parse.quote(tr)}")
+    return "magnet:?" + "&".join(query)

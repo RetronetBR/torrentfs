@@ -38,6 +38,12 @@ systemctl --user daemon-reload
 systemctl --user enable --now torrentfs.service
 ```
 
+Para parar o servico:
+
+```bash
+systemctl --user stop torrentfs.service
+```
+
 Socket padrao do servico:
 
 ```bash
@@ -107,6 +113,17 @@ Arquivo (ordem de prioridade):
   "resume": {
     "save_interval_s": 300
   },
+  "trackers": {
+    "enable": true,
+    "add": [
+      "udp://tracker.retronet.com.br:6969/announce"
+    ],
+    "aliases": {
+      "torrentfs://bootstrap": [
+        "udp://tracker.retronet.com.br:6969/announce"
+      ]
+    }
+  },
   "prefetch": {
     "on_start": false,
     "on_start_mode": "media",
@@ -158,7 +175,13 @@ Arquivo (ordem de prioridade):
 }
 ```
 
+Nota: o uso de trackers extras/`torrentfs://bootstrap` deve ser considerado
+apenas se voce pretende colaborar com a rede TorrentFS. Caso contrario,
+desative em `trackers.enable` e remova os trackers em `trackers.add`.
+
 Tambem pode apontar outro arquivo via `TORRENTFSD_CONFIG`.
+Em desenvolvimento, use `TORRENTFSD_CONFIG` para evitar que o daemon leia
+`/etc/torrentfs/torrentfsd.json`.
 
 ## Instalacao (pipx)
 
@@ -191,7 +214,7 @@ Comandos no PATH quando instalado via pipx:
 - `torrentfs-fuse` (FUSE)
 
 Opcional: use `--socket` para apontar outro socket quando houver mais de um daemon.
-Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se existir), senao `/tmp/torrentfsd.sock`.
+Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se existir), com fallback para `/tmp/torrentfsd.sock` se o socket nao responder.
 Opcional: use `--mount` para permitir paths do filesystem (ex.: `/mnt/torrentfs/...`) em comandos com `path`.
 Opcional: use `--json` para forcar saida em JSON.
 Opcional: em modo desenvolvimento, use `python -m cli.main` no lugar de `torrentfs`.
@@ -206,6 +229,62 @@ Add magnet (salva .torrent em `torrents/`):
 
 ```bash
 torrentfs add-magnet "<magnet:...>"
+```
+
+Adicionar fonte via plugin (ex.: magnet):
+
+```bash
+torrentfs source-add "magnet:?xt=urn:btih:..."
+```
+
+Adicionar .torrent via URL direta:
+
+```bash
+torrentfs add-url "https://exemplo.com/arquivo.torrent"
+```
+
+Aliases de nomes (para o FUSE):
+
+```bash
+torrentfs alias set <id> "Nome amigavel"
+torrentfs alias rm <id>
+torrentfs alias list
+```
+
+Adicionar fonte do archive.org (ID ou URL):
+
+```bash
+torrentfs source-add "archive:revistasabereletronica089fev1980"
+torrentfs source-add "https://archive.org/details/revistasabereletronica089fev1980"
+```
+
+Adicionar tracker ao torrent (usa `trackers.add` se nenhum `--tracker` for passado):
+
+```bash
+torrentfs --torrent <id|name> add-tracker
+torrentfs --torrent <id|name> add-tracker --tracker udp://tracker.retronet.org:6969/announce
+```
+
+Obter infohash (v1/v2) do torrent:
+
+```bash
+torrentfs --torrent <id|name> infohash
+```
+
+Exibir metadados completos do .torrent:
+
+```bash
+torrentfs --torrent <id|name> torrent-info
+```
+
+Consultar scrape no tracker. Por padrao usa o primeiro tracker configurado em `trackers.add`
+no arquivo de configuracao. Para scrape HTTP, o CLI converte automaticamente `/announce`
+em `/scrape`.
+
+```bash
+torrentfs --torrent <id|name> tracker-scrape
+torrentfs tracker-scrape <infohash>
+torrentfs tracker-scrape <infohash> --tracker http://tracker.retronet.com.br:6969/announce
 ```
 
 Show daemon config (effective values):
@@ -224,6 +303,12 @@ Prune cache (remove torrents sem referencia ativa):
 
 ```bash
 torrentfs prune-cache
+```
+
+Remover torrent pelo ID:
+
+```bash
+torrentfs --torrent <id> remove-torrent
 ```
 
 Dry-run:
@@ -332,6 +417,7 @@ Pin directory (recursive):
 
 ```bash
 torrentfs --torrent <id|name> pin-dir <path> --max-files 100 --depth 2
+torrentfs --torrent <id|name> pin-all --max-files 100 --depth 2
 ```
 
 Unpin file:

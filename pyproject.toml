@@ -10,6 +10,7 @@ readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.10"
 dependencies = [
+  "bencodepy",
   "libtorrent",
   "fusepy",
 ]
@@ -20,4 +21,4 @@ torrentfsd = "daemon.main:main"
 torrentfs-fuse = "torrentfs_fuse.fs:main"
 
 [tool.setuptools]
-packages = ["cli", "common", "daemon", "torrentfs_fuse"]
+packages = ["cli", "common", "daemon", "plugins", "torrentfs_fuse"]
