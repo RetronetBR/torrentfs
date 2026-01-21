@@ -114,9 +114,13 @@ Arquivo (ordem de prioridade):
     "save_interval_s": 300
   },
   "trackers": {
+    "enable": true,
+    "add": [
+      "udp://tracker.retronet.com.br:6969/announce"
+    ],
     "aliases": {
       "torrentfs://bootstrap": [
-        "udp://tracker.retronet.org:6969/announce"
+        "udp://tracker.retronet.com.br:6969/announce"
       ]
     }
   },
@@ -171,7 +175,13 @@ Arquivo (ordem de prioridade):
 }
 ```
 
+Nota: o uso de trackers extras/`torrentfs://bootstrap` deve ser considerado
+apenas se voce pretende colaborar com a rede TorrentFS. Caso contrario,
+desative em `trackers.enable` e remova os trackers em `trackers.add`.
+
 Tambem pode apontar outro arquivo via `TORRENTFSD_CONFIG`.
+Em desenvolvimento, use `TORRENTFSD_CONFIG` para evitar que o daemon leia
+`/etc/torrentfs/torrentfsd.json`.
 
 ## Instalacao (pipx)
 
@@ -232,6 +242,35 @@ Adicionar fonte do archive.org (ID ou URL):
 ```bash
 torrentfs source-add "archive:revistasabereletronica089fev1980"
 torrentfs source-add "https://archive.org/details/revistasabereletronica089fev1980"
+```
+
+Adicionar tracker ao torrent (usa `trackers.add` se nenhum `--tracker` for passado):
+
+```bash
+torrentfs --torrent <id|name> add-tracker
+torrentfs --torrent <id|name> add-tracker --tracker udp://tracker.retronet.org:6969/announce
+```
+
+Obter infohash (v1/v2) do torrent:
+
+```bash
+torrentfs --torrent <id|name> infohash
+```
+
+Exibir metadados completos do .torrent:
+
+```bash
+torrentfs --torrent <id|name> torrent-info
+```
+
+Consultar scrape no tracker. Por padrao usa o primeiro tracker configurado em `trackers.add`
+no arquivo de configuracao. Para scrape HTTP, o CLI converte automaticamente `/announce`
+em `/scrape`.
+
+```bash
+torrentfs --torrent <id|name> tracker-scrape
+torrentfs tracker-scrape <infohash>
+torrentfs tracker-scrape <infohash> --tracker http://tracker.retronet.com.br:6969/announce
 ```
 
 Show daemon config (effective values):
@@ -358,6 +397,7 @@ Pin directory (recursive):
 
 ```bash
 torrentfs --torrent <id|name> pin-dir <path> --max-files 100 --depth 2
+torrentfs --torrent <id|name> pin-all --max-files 100 --depth 2
 ```
 
 Unpin file:

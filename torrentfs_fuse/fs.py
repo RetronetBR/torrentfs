@@ -87,7 +87,21 @@ def _error_from_resp(resp: dict) -> FuseOSError:
     return FuseOSError(errno.EIO)
 
 
+def _is_archive_torrent(tname: str, name: str) -> bool:
+    tname = str(tname or "")
+    lname = tname.lower()
+    if "archive.org" in lname:
+        return True
+    if lname.endswith("_archive.torrent") or lname.endswith("_archive.torrent.torrent"):
+        return True
+    base = os.path.splitext(tname)[0].lower() if tname else str(name or "").lower()
+    if base.endswith("_archive"):
+        return True
+    return False
+
+
 class TorrentFS(Operations):
+    _ARCHIVE_GROUP = "Archive.org"
     """
     FUSE read-only mapeando operações para o RPC do daemon.
     """
@@ -192,13 +206,29 @@ class TorrentFS(Operations):
                 dir_name = base
             else:
                 dir_name = f"{base}__{tid}"
-            mapped.append({"id": tid, "name": name, "torrent_name": tname, "dir_name": dir_name})
+            group = self._ARCHIVE_GROUP if _is_archive_torrent(tname, name) else ""
+            mapped.append(
+                {
+                    "id": tid,
+                    "name": name,
+                    "torrent_name": tname,
+                    "dir_name": dir_name,
+                    "group": group,
+                }
+            )
 
         self._torrents_cache["list"] = {"_ts": time.time(), "items": mapped}
         return mapped
 
-    def _torrent_dir_map(self) -> Dict[str, str]:
-        return {t["dir_name"]: t["id"] for t in self._list_torrents()}
+    def _torrent_dir_map(self, group: Optional[str] = None) -> Dict[str, str]:
+        out = {}
+        for t in self._list_torrents():
+            if group and t.get("group") != group:
+                continue
+            if not group and t.get("group"):
+                continue
+            out[t["dir_name"]] = t["id"]
+        return out
 
     def _resolve_path(self, path: str) -> Tuple[Optional[str], str, bool]:
         clean = _clean_path(path)
@@ -207,6 +237,18 @@ class TorrentFS(Operations):
 
         if clean == "":
             return None, "", True
+
+        if clean == self._ARCHIVE_GROUP:
+            return None, self._ARCHIVE_GROUP, True
+
+        if clean.startswith(f"{self._ARCHIVE_GROUP}/"):
+            parts = clean.split("/", 2)
+            dir_name = parts[1] if len(parts) > 1 else ""
+            inner = parts[2] if len(parts) > 2 else ""
+            tid = self._torrent_dir_map(group=self._ARCHIVE_GROUP).get(dir_name)
+            if not tid:
+                raise FuseOSError(errno.ENOENT)
+            return tid, inner, inner == ""
 
         parts = clean.split("/", 1)
         dir_name = parts[0]
@@ -240,8 +282,18 @@ class TorrentFS(Operations):
         return st
 
     def _list(self, path: str):
-        if not self.torrent and path in ("", "/"):
-            return [{"name": t["dir_name"], "type": "dir", "size": 0} for t in self._list_torrents()]
+        clean = _clean_path(path)
+        if not self.torrent and clean == "":
+            items = self._list_torrents()
+            entries = [{"name": t["dir_name"], "type": "dir", "size": 0} for t in items if not t.get("group")]
+            has_archive = any(t.get("group") == self._ARCHIVE_GROUP for t in items)
+            if has_archive:
+                entries.append({"name": self._ARCHIVE_GROUP, "type": "dir", "size": 0})
+            return entries
+
+        if not self.torrent and clean == self._ARCHIVE_GROUP:
+            items = [t for t in self._list_torrents() if t.get("group") == self._ARCHIVE_GROUP]
+            return [{"name": t["dir_name"], "type": "dir", "size": 0} for t in items]
 
         torrent, inner, _ = self._resolve_path(path)
         list_key = self._cache_key(torrent, inner)

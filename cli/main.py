@@ -7,6 +7,9 @@ import json
 import sys
 import time
 import re
+import binascii
+import urllib.parse
+import urllib.request
 
 try:
     import libtorrent as lt
@@ -16,6 +19,7 @@ except Exception:
 from cli.client import rpc_call
 from plugins import get_plugin_for_uri
 from plugins.base import SourceError
+from daemon.engine import get_effective_config
 
 
 async def get_default_torrent(socket, explicit=None):
@@ -76,7 +80,6 @@ def _default_socket_path() -> str:
         candidate = os.path.join(runtime_dir, "torrentfsd.sock")
         if os.path.exists(candidate):
             return candidate
-        return candidate
     return "/tmp/torrentfsd.sock"
 
 
@@ -94,27 +97,32 @@ def main():
         help="Saida em JSON (default: texto simples)",
     )
 
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")
 
     # -----------------------------
     # torrents
     # -----------------------------
-    sub.add_parser("torrents", help="Listar torrents carregados")
+    p_torrents = sub.add_parser("torrents", help="Torrent: listar torrents carregados")
+    p_torrents.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Inclui caminho do cache na listagem",
+    )
 
     # -----------------------------
     # config
     # -----------------------------
-    sub.add_parser("config", help="Mostrar configuracao efetiva do daemon")
+    sub.add_parser("config", help="Daemon: mostrar configuracao efetiva")
 
     # -----------------------------
     # cache-size
     # -----------------------------
-    sub.add_parser("cache-size", help="Tamanho total do cache")
+    sub.add_parser("cache-size", help="Cache: tamanho total do cache")
 
     # -----------------------------
     # prune-cache
     # -----------------------------
-    p_prune = sub.add_parser("prune-cache", help="Limpar cache sem referencia ativa")
+    p_prune = sub.add_parser("prune-cache", help="Cache: limpar cache sem referencia ativa")
     p_prune.add_argument(
         "--dry-run",
         action="store_true",
@@ -124,7 +132,7 @@ def main():
     # -----------------------------
     # add-magnet
     # -----------------------------
-    p_add_magnet = sub.add_parser("add-magnet", help="Adicionar magnet e salvar .torrent")
+    p_add_magnet = sub.add_parser("add-magnet", help="Fonte: adicionar magnet e salvar .torrent")
     p_add_magnet.add_argument("magnet")
     p_add_magnet.add_argument(
         "--dir",
@@ -141,7 +149,7 @@ def main():
     # -----------------------------
     # source-add
     # -----------------------------
-    p_source = sub.add_parser("source-add", help="Adicionar fonte via plugin")
+    p_source = sub.add_parser("source-add", help="Fonte: adicionar via plugin")
     p_source.add_argument("uri")
     p_source.add_argument(
         "--dir",
@@ -156,9 +164,20 @@ def main():
     )
 
     # -----------------------------
+    # add-tracker
+    # -----------------------------
+    p_add_tracker = sub.add_parser("add-tracker", help="Tracker: adicionar ao torrent")
+    p_add_tracker.add_argument(
+        "--tracker",
+        action="append",
+        default=[],
+        help="URL do tracker (pode repetir)",
+    )
+
+    # -----------------------------
     # status
     # -----------------------------
-    p_status = sub.add_parser("status")
+    p_status = sub.add_parser("status", help="Torrent: status do torrent selecionado")
     p_status.add_argument("--unit", choices=["bytes", "kb", "mb", "gb"], default="bytes")
     p_status.add_argument(
         "--human",
@@ -170,7 +189,7 @@ def main():
     # -----------------------------
     # status-all
     # -----------------------------
-    p_status_all = sub.add_parser("status-all", help="Resumo global de todos os torrents")
+    p_status_all = sub.add_parser("status-all", help="Torrent: resumo global de todos os torrents")
     p_status_all.add_argument("--unit", choices=["bytes", "kb", "mb", "gb"], default="bytes")
     p_status_all.add_argument(
         "--human",
@@ -182,7 +201,7 @@ def main():
     # -----------------------------
     # downloads
     # -----------------------------
-    p_downloads = sub.add_parser("downloads", help="Listar downloads em execucao")
+    p_downloads = sub.add_parser("downloads", help="Torrent: listar downloads em execucao")
     p_downloads.add_argument(
         "--max-files",
         type=int,
@@ -193,7 +212,7 @@ def main():
     # -----------------------------
     # uploads
     # -----------------------------
-    p_uploads = sub.add_parser("uploads", help="Listar peers com transferencia ativa")
+    p_uploads = sub.add_parser("uploads", help="Rede: listar peers com transferencia ativa")
     p_uploads.add_argument(
         "--all",
         action="store_true",
@@ -208,35 +227,55 @@ def main():
     # -----------------------------
     # reannounce
     # -----------------------------
-    sub.add_parser("reannounce", help="Forcar announce do tracker/DHT")
+    sub.add_parser("reannounce", help="Rede: forcar announce do tracker/DHT")
 
     # -----------------------------
     # reannounce-all
     # -----------------------------
-    sub.add_parser("reannounce-all", help="Forcar announce em todos os torrents")
+    sub.add_parser("reannounce-all", help="Rede: forcar announce em todos os torrents")
 
     # -----------------------------
     # file-info
     # -----------------------------
-    p_file_info = sub.add_parser("file-info", help="Info de pieces de um arquivo")
+    p_file_info = sub.add_parser("file-info", help="Arquivo: info de pieces de um arquivo")
     p_file_info.add_argument("path")
 
     # -----------------------------
     # prefetch-info
     # -----------------------------
-    p_prefetch_info = sub.add_parser("prefetch-info", help="Info de prefetch de um arquivo")
+    p_prefetch_info = sub.add_parser("prefetch-info", help="Prefetch: info de um arquivo")
     p_prefetch_info.add_argument("path")
+
+    # -----------------------------
+    # torrent-info
+    # -----------------------------
+    sub.add_parser("torrent-info", help="Torrent: mostrar metadados do .torrent")
+
+    # -----------------------------
+    # infohash
+    # -----------------------------
+    sub.add_parser("infohash", help="Torrent: mostrar infohash (v1/v2)")
+
+    # -----------------------------
+    # tracker-scrape
+    # -----------------------------
+    p_scrape = sub.add_parser("tracker-scrape", help="Tracker: consultar scrape por infohash")
+    p_scrape.add_argument("infohash", nargs="?")
+    p_scrape.add_argument(
+        "--tracker",
+        help="URL do tracker (default: trackers.add[0] no config)",
+    )
 
     # -----------------------------
     # ls
     # -----------------------------
-    p_ls = sub.add_parser("ls")
+    p_ls = sub.add_parser("ls", help="Arquivo: listar arquivos e diretorios")
     p_ls.add_argument("path", nargs="?", default="")
 
     # -----------------------------
     # cat
     # -----------------------------
-    p_cat = sub.add_parser("cat")
+    p_cat = sub.add_parser("cat", help="Arquivo: ler bytes de um arquivo")
     p_cat.add_argument("path")
     p_cat.add_argument("--size", type=int, default=65536)
     p_cat.add_argument("--offset", type=int, default=0)
@@ -265,13 +304,13 @@ def main():
     # -----------------------------
     # pin
     # -----------------------------
-    p_pin = sub.add_parser("pin")
+    p_pin = sub.add_parser("pin", help="Pin: pinar arquivo")
     p_pin.add_argument("path")
 
     # -----------------------------
     # cp
     # -----------------------------
-    p_cp = sub.add_parser("cp", help="Copiar do mount para o disco local")
+    p_cp = sub.add_parser("cp", help="Arquivo: copiar do mount para o disco local")
     p_cp.add_argument("src")
     p_cp.add_argument("dest")
     p_cp.add_argument(
@@ -308,7 +347,7 @@ def main():
     # -----------------------------
     # du
     # -----------------------------
-    p_du = sub.add_parser("du", help="Somar tamanho dos arquivos por path")
+    p_du = sub.add_parser("du", help="Arquivo: somar tamanho dos arquivos por path")
     p_du.add_argument("path", nargs="?", default="")
     p_du.add_argument(
         "--depth",
@@ -320,7 +359,7 @@ def main():
     # -----------------------------
     # pin-dir
     # -----------------------------
-    p_pin_dir = sub.add_parser("pin-dir", help="Pinar todos os arquivos de um diretório")
+    p_pin_dir = sub.add_parser("pin-dir", help="Pin: pinar todos os arquivos de um diretorio")
     p_pin_dir.add_argument("path")
     p_pin_dir.add_argument(
         "--max-files",
@@ -336,15 +375,32 @@ def main():
     )
 
     # -----------------------------
+    # pin-all
+    # -----------------------------
+    p_pin_all = sub.add_parser("pin-all", help="Pin: pinar todos os arquivos do torrent")
+    p_pin_all.add_argument(
+        "--max-files",
+        type=int,
+        default=0,
+        help="Limite maximo de arquivos (0 = sem limite)",
+    )
+    p_pin_all.add_argument(
+        "--depth",
+        type=int,
+        default=-1,
+        help="Profundidade maxima de diretórios (0 = só o root, -1 = ilimitado)",
+    )
+
+    # -----------------------------
     # unpin
     # -----------------------------
-    p_unpin = sub.add_parser("unpin")
+    p_unpin = sub.add_parser("unpin", help="Pin: despinar arquivo")
     p_unpin.add_argument("path")
 
     # -----------------------------
     # unpin-dir
     # -----------------------------
-    p_unpin_dir = sub.add_parser("unpin-dir", help="Despinar todos os arquivos de um diretório")
+    p_unpin_dir = sub.add_parser("unpin-dir", help="Pin: despinar todos os arquivos de um diretorio")
     p_unpin_dir.add_argument("path")
     p_unpin_dir.add_argument(
         "--max-files",
@@ -362,12 +418,12 @@ def main():
     # -----------------------------
     # pinned
     # -----------------------------
-    sub.add_parser("pinned", help="Listar arquivos pinados")
+    sub.add_parser("pinned", help="Pin: listar arquivos pinados")
 
     # -----------------------------
     # prefetch
     # -----------------------------
-    p_prefetch = sub.add_parser("prefetch", help="Pré-cache de arquivo ou diretório")
+    p_prefetch = sub.add_parser("prefetch", help="Prefetch: pre-cache de arquivo ou diretorio")
     p_prefetch.add_argument("path")
     p_prefetch.add_argument(
         "--max-files",
@@ -383,6 +439,14 @@ def main():
     )
 
     args = ap.parse_args()
+    if not args.cmd:
+        ap.print_help()
+        return
+    explicit_socket = "--socket" in sys.argv
+    if not explicit_socket:
+        fallback = "/tmp/torrentfsd.sock"
+        if isinstance(args.socket, str) and args.socket != fallback:
+            args.socket = [args.socket, fallback]
 
     async def run():
         def _print_json(obj):
@@ -451,6 +515,24 @@ def main():
                 msg += f"\t{client}"
             print(msg)
 
+        def _normalize_infohash(value: str) -> tuple[str, str]:
+            val = value.strip()
+            if not val:
+                return "", ""
+            if "%" in val:
+                try:
+                    raw = urllib.parse.unquote_to_bytes(val)
+                    return raw.hex(), "".join(f"%{b:02x}" for b in raw)
+                except Exception:
+                    return "", ""
+            if len(val) == 40 and re.fullmatch(r"[0-9a-fA-F]{40}", val):
+                try:
+                    raw = binascii.unhexlify(val)
+                    return val.lower(), "".join(f"%{b:02x}" for b in raw)
+                except Exception:
+                    return "", ""
+            return "", ""
+
         def _torrent_label_map(torrents: list) -> dict:
             dir_map = _build_torrent_dir_map(torrents)
             return {tid: name for name, tid in dir_map.items()}
@@ -485,6 +567,44 @@ def main():
                 if ih:
                     out[ih] = path
             return out
+
+        def _save_torrent_bytes(payload: bytes, out_dir: str, name_hint: str | None = None):
+            torrent_dir = os.path.abspath(out_dir)
+            os.makedirs(torrent_dir, exist_ok=True)
+
+            base_name = _sanitize_name(name_hint or "arquivo")
+            if base_name.endswith(".torrent"):
+                out_name = base_name
+            else:
+                out_name = base_name + ".torrent"
+            out_path = os.path.join(torrent_dir, out_name)
+            if os.path.exists(out_path):
+                suffix = str(int(time.time()))
+                base_name = _sanitize_name(name_hint or "arquivo")
+                if base_name.endswith(".torrent"):
+                    base_name = base_name[:-8]
+                out_name = f"{base_name}__{suffix}.torrent"
+                out_path = os.path.join(torrent_dir, out_name)
+
+            with open(out_path, "wb") as f:
+                f.write(payload)
+
+            _print_ok(f"salvo: {out_path}")
+            return out_path
+
+        def _save_torrent_url(url: str, out_dir: str, timeout: int, name_hint: str | None = None):
+            try:
+                import urllib.request
+            except Exception as e:
+                _print_error(f"urllib indisponivel: {e}")
+                return None
+            try:
+                with urllib.request.urlopen(url, timeout=timeout) as resp:
+                    data = resp.read()
+            except Exception as e:
+                _print_error(f"falha ao baixar .torrent: {e}")
+                return None
+            return _save_torrent_bytes(data, out_dir, name_hint)
 
         def _save_magnet(magnet: str, out_dir: str, timeout: int):
             if lt is None:
@@ -570,6 +690,8 @@ def main():
             for item in items:
                 if item.kind == "magnet":
                     _save_magnet(item.value, out_dir, timeout)
+                elif item.kind == "torrent_url":
+                    _save_torrent_url(item.value, out_dir, timeout, item.name)
                 else:
                     _print_error(f"tipo nao suportado: {item.kind}")
 
@@ -629,12 +751,22 @@ def main():
             if not resp.get("ok"):
                 _print_error(resp.get("error", "falha ao listar torrents"))
                 return
+            rows = []
             for t in resp.get("torrents", []):
-                tid = t.get("id", "")
-                name = t.get("name", "")
-                tname = t.get("torrent_name", "")
-                cache = t.get("cache", "")
-                print(f"{tid}\t{name}\t{tname}\t{cache}")
+                tid = str(t.get("id", ""))
+                name = str(t.get("name", ""))
+                tname = str(t.get("torrent_name", ""))
+                cache = str(t.get("cache", ""))
+                if args.verbose:
+                    rows.append([tid, name, tname, cache])
+                else:
+                    rows.append([tid, name, tname])
+            if not rows:
+                return
+            widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+            for row in rows:
+                line = "  ".join(row[i].ljust(widths[i]) for i in range(len(row)))
+                print(line)
             return
 
         if args.cmd == "config":
@@ -696,6 +828,30 @@ def main():
 
         if args.cmd == "source-add":
             _handle_source_add(args.uri, args.dir, args.timeout)
+            return
+
+        if args.cmd == "add-tracker":
+            torrent = args.torrent or await get_default_torrent(args.socket, None)
+            payload = {"cmd": "add-tracker", "torrent": torrent}
+            if args.tracker:
+                payload["trackers"] = args.tracker
+            resp, _ = await rpc_call(args.socket, payload)
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao adicionar tracker"))
+                return
+            added = resp.get("added", [])
+            skipped = resp.get("skipped", [])
+            if added:
+                print("adicionados:")
+                for url in added:
+                    print(f"  {url}")
+            if skipped:
+                print("ignorados:")
+                for url in skipped:
+                    print(f"  {url}")
             return
 
         if args.cmd == "status-all":
@@ -1062,6 +1218,163 @@ def main():
                 for r in ranges:
                     print(f"  offset={r.get('offset')} length={r.get('length')}")
 
+        elif args.cmd == "torrent-info":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "torrent-info", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao obter torrent info"))
+                return
+            info = resp.get("info", {})
+            print("*** BitTorrent File Information ***")
+            if info.get("comment"):
+                print(f"Comment: {info.get('comment')}")
+            if info.get("creation_date_str"):
+                print(f"Dated: {info.get('creation_date_str')}")
+            if info.get("created_by"):
+                print(f"Created by {info.get('created_by')}")
+            if info.get("creation_date_str"):
+                print(f"Creation Date: {info.get('creation_date_str')}")
+            print(f"Mode: {info.get('mode')}")
+            trackers = info.get("trackers", [])
+            if trackers:
+                print("Announce:")
+                for tr in trackers:
+                    print(f" {tr}")
+            if info.get("infohash"):
+                print(f"Info Hash: {info.get('infohash')}")
+            print(f"Piece Length: {_fmt_bytes(int(info.get('piece_length') or 0))}")
+            print(f"The Number of Pieces: {info.get('num_pieces')}")
+            print(f"Total Length: {_fmt_bytes(int(info.get('total_size') or 0))}")
+            print(f"Name: {info.get('name')}")
+            if info.get("magnet"):
+                print(f"Magnet URI: {info.get('magnet')}")
+            return
+
+        elif args.cmd == "infohash":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "infohash", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao obter infohash"))
+                return
+            info = resp.get("info", {})
+            v1_hex = info.get("v1_hex", "")
+            v1_url = info.get("v1_urlencoded", "")
+            v2_hex = info.get("v2_hex", "")
+            if not v1_hex and not v2_hex:
+                _print_error("infohash indisponivel")
+                return
+            if v1_hex:
+                print(f"v1_hex: {v1_hex}")
+            if v1_url:
+                print(f"v1_urlencoded: {v1_url}")
+            if v2_hex:
+                print(f"v2_hex: {v2_hex}")
+            return
+
+        elif args.cmd == "tracker-scrape":
+            ih_value = args.infohash
+            if not ih_value:
+                if not args.torrent:
+                    _print_error("use --torrent ou informe o infohash")
+                    return
+                resp_hash, _ = await rpc_call(
+                    args.socket,
+                    {"cmd": "infohash", "torrent": torrent},
+                )
+                if not resp_hash.get("ok"):
+                    _print_error(resp_hash.get("error", "falha ao obter infohash"))
+                    return
+                info = resp_hash.get("info", {})
+                ih_value = info.get("v1_urlencoded") or info.get("v1_hex", "")
+            ih_hex, ih_url = _normalize_infohash(ih_value)
+            if not ih_url:
+                _print_error("infohash invalido (use hex de 40 chars ou urlencoded)")
+                return
+            tracker = args.tracker
+            if not tracker:
+                cfg = get_effective_config()
+                tracker = (cfg.get("trackers", {}).get("add") or [None])[0]
+            if not tracker:
+                _print_error("tracker nao configurado (use --tracker ou trackers.add)")
+                return
+            if tracker.startswith("udp://"):
+                tracker = "http://" + tracker[len("udp://"):]
+            if not tracker.startswith("http"):
+                _print_error("scrape suporta apenas trackers HTTP/HTTPS")
+                return
+            if "/announce" in tracker:
+                scrape_url = tracker.replace("/announce", "/scrape")
+            else:
+                scrape_url = tracker.rstrip("/") + "/scrape"
+            url = f"{scrape_url}?info_hash={ih_url}"
+            try:
+                import bencodepy
+            except Exception as e:
+                _print_error(f"bencodepy nao disponivel: {e}")
+                return
+            try:
+                with urllib.request.urlopen(url, timeout=15) as resp:
+                    payload = resp.read()
+            except Exception as e:
+                _print_error(f"falha ao consultar tracker: {e}")
+                return
+            try:
+                data = bencodepy.decode(payload)
+            except Exception as e:
+                _print_error(f"falha ao decodificar resposta: {e}")
+                return
+            files = data.get(b"files", {}) if isinstance(data, dict) else {}
+            entry = None
+            if ih_url:
+                try:
+                    key = urllib.parse.unquote_to_bytes(ih_url)
+                    entry = files.get(key)
+                except Exception:
+                    entry = None
+            if entry is None and files:
+                entry = next(iter(files.values()))
+            if entry is None:
+                _print_error("scrape sem dados para o infohash")
+                return
+            out = {
+                "complete": int(entry.get(b"complete", 0)),
+                "incomplete": int(entry.get(b"incomplete", 0)),
+                "downloaded": int(entry.get(b"downloaded", 0)),
+                "tracker": tracker,
+            }
+            if args.json:
+                _print_json({"ok": True, "infohash": ih_hex, **out})
+                return
+            print(f"tracker: {tracker}")
+            print(f"infohash: {ih_hex}")
+            print(f"seeders: {out['complete']}")
+            print(f"leechers: {out['incomplete']}")
+            print(f"downloaded: {out['downloaded']}")
+            return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao obter infohash"))
+                return
+            info = resp.get("info", {})
+            v1_hex = info.get("v1_hex", "")
+            v1_url = info.get("v1_urlencoded", "")
+            v2_hex = info.get("v2_hex", "")
+            if v1_hex:
+                print(f"v1_hex: {v1_hex}")
+            if v1_url:
+                print(f"v1_urlencoded: {v1_url}")
+            if v2_hex:
+                print(f"v2_hex: {v2_hex}")
+
         elif args.cmd == "ls":
             resp, _ = await rpc_call(
                 args.socket,
@@ -1162,6 +1475,25 @@ def main():
                 )
 
             pinned, errors = await _walk_and_apply(args.path, max_files, max_depth, _pin)
+            out = {"ok": len(errors) == 0, "pinned": pinned, "errors": errors}
+            if args.json:
+                _print_json(out)
+            else:
+                _print_ok(f"pinned: {pinned} errors: {len(errors)}")
+                for err in errors:
+                    _print_error(f"{err.get('path')}: {err.get('error')}")
+
+        elif args.cmd == "pin-all":
+            max_files = int(args.max_files)
+            max_depth = int(args.depth)
+
+            async def _pin(path: str):
+                return await rpc_call(
+                    args.socket,
+                    {"cmd": "pin", "torrent": torrent, "path": path},
+                )
+
+            pinned, errors = await _walk_and_apply("", max_files, max_depth, _pin)
             out = {"ok": len(errors) == 0, "pinned": pinned, "errors": errors}
             if args.json:
                 _print_json(out)
