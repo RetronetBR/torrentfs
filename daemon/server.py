@@ -255,6 +255,36 @@ class TorrentFSServer:
                             },
                         )
 
+                    elif cmd == "publish-tracker":
+                        engine = self._get_engine_from_req(req)
+                        trackers = req.get("trackers")
+                        data = engine.publish_tracker(trackers)
+                        await send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": True,
+                                "added": data.get("added", []),
+                                "skipped": data.get("skipped", []),
+                            },
+                        )
+
+                    elif cmd == "trackers":
+                        engine = self._get_engine_from_req(req)
+                        trackers = engine.trackers_list()
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "trackers": trackers},
+                        )
+
+                    elif cmd == "tracker-status":
+                        engine = self._get_engine_from_req(req)
+                        status = engine.trackers_status()
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "trackers": status},
+                        )
+
                     elif cmd == "read":
                         engine = self._get_engine_from_req(req)
 

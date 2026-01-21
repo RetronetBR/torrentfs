@@ -10,6 +10,7 @@ import re
 import binascii
 import urllib.parse
 import urllib.request
+import random
 
 try:
     import libtorrent as lt
@@ -241,6 +242,22 @@ def main():
     )
 
     # -----------------------------
+    # publish-tracker
+    # -----------------------------
+    p_publish = sub.add_parser("publish-tracker", help="Tracker: forcar anuncio no tracker")
+    p_publish.add_argument(
+        "--tracker",
+        action="append",
+        default=[],
+        help="URL do tracker (pode repetir)",
+    )
+
+    # -----------------------------
+    # trackers
+    # -----------------------------
+    sub.add_parser("trackers", help="Tracker: listar trackers efetivos do torrent")
+
+    # -----------------------------
     # status
     # -----------------------------
     p_status = sub.add_parser("status", help="Torrent: status do torrent selecionado")
@@ -331,6 +348,23 @@ def main():
         "--tracker",
         help="URL do tracker (default: trackers.add[0] no config)",
     )
+
+    # -----------------------------
+    # tracker-status
+    # -----------------------------
+    sub.add_parser("tracker-status", help="Tracker: status dos trackers do torrent")
+
+    # -----------------------------
+    # tracker-announce
+    # -----------------------------
+    p_announce = sub.add_parser(
+        "tracker-announce", help="Tracker: teste de announce via HTTP"
+    )
+    p_announce.add_argument(
+        "--tracker",
+        help="URL do tracker (default: trackers.add[0] no config)",
+    )
+    p_announce.add_argument("--port", type=int, default=6881)
 
     # -----------------------------
     # ls
@@ -911,6 +945,20 @@ def main():
             cfg = resp.get("config", {})
             print(f"config_path: {cfg.get('config_path', '')}")
             print(f"max_metadata_bytes: {cfg.get('max_metadata_bytes', '')}")
+            trackers = cfg.get("trackers", {})
+            if trackers:
+                print("trackers:")
+                print(f"  enable: {trackers.get('enable')}")
+                add_list = trackers.get("add") or []
+                if add_list:
+                    print("  add:")
+                    for item in add_list:
+                        print(f"    - {item}")
+                aliases = trackers.get("aliases") or {}
+                if aliases:
+                    print("  aliases:")
+                    for key, values in aliases.items():
+                        print(f"    {key}: {values}")
             pf = cfg.get("prefetch", {})
             print("prefetch.media:")
             for k, v in pf.get("media", {}).items():
@@ -1004,6 +1052,187 @@ def main():
                 print("ignorados:")
                 for url in skipped:
                     print(f"  {url}")
+            return
+
+        if args.cmd == "publish-tracker":
+            torrent = args.torrent or await get_default_torrent(args.socket, None)
+            payload = {"cmd": "publish-tracker", "torrent": torrent}
+            if args.tracker:
+                payload["trackers"] = args.tracker
+            resp, _ = await rpc_call(args.socket, payload)
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao publicar"))
+                return
+            added = resp.get("added", [])
+            skipped = resp.get("skipped", [])
+            if added:
+                print("adicionados:")
+                for url in added:
+                    print(f"  {url}")
+            if skipped:
+                print("ignorados:")
+                for url in skipped:
+                    print(f"  {url}")
+            _print_ok("reannounce ok")
+            return
+
+        if args.cmd == "trackers":
+            torrent = args.torrent or await get_default_torrent(args.socket, None)
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "trackers", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao listar trackers"))
+                return
+            trackers = resp.get("trackers", {}) or {}
+            handle = trackers.get("handle", [])
+            torrent_list = trackers.get("torrent", [])
+            if handle:
+                print("handle:")
+                for url in handle:
+                    print(f"  {url}")
+            if torrent_list:
+                print("torrent:")
+                for url in torrent_list:
+                    print(f"  {url}")
+            if not handle and not torrent_list:
+                print("(nenhum tracker)")
+            return
+
+        if args.cmd == "tracker-status":
+            torrent = args.torrent or await get_default_torrent(args.socket, None)
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "tracker-status", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao listar trackers"))
+                return
+            trackers = resp.get("trackers", []) or []
+            if not trackers:
+                print("(nenhum tracker)")
+                return
+            print("url\ttier\tfails\tupdating\tverified\tnext\tmin\tlast\tlast_error")
+            for entry in trackers:
+                url = entry.get("url", "")
+                tier = entry.get("tier", 0)
+                fails = entry.get("fails", 0)
+                updating = "1" if entry.get("updating") else "0"
+                verified = "1" if entry.get("verified") else "0"
+                next_a = entry.get("next_announce", "")
+                min_a = entry.get("min_announce", "")
+                last_a = entry.get("last_announce", "")
+                last_err = entry.get("last_error", "")
+                print(
+                    f"{url}\t{tier}\t{fails}\t{updating}\t{verified}\t{next_a}\t{min_a}\t{last_a}\t{last_err}"
+                )
+            return
+
+        if args.cmd == "tracker-announce":
+            torrent = args.torrent or await get_default_torrent(args.socket, None)
+            if not torrent:
+                _print_error("use --torrent")
+                return
+            resp_info, _ = await rpc_call(
+                args.socket,
+                {"cmd": "torrent-info", "torrent": torrent},
+            )
+            if not resp_info.get("ok"):
+                _print_error(resp_info.get("error", "falha ao obter info do torrent"))
+                return
+            info = resp_info.get("info", {}) or {}
+            infohash = info.get("infohash", "")
+            total_size = int(info.get("total_size", 0) or 0)
+            if not infohash:
+                _print_error("infohash indisponivel")
+                return
+            ih_url = urllib.parse.quote_from_bytes(bytes.fromhex(infohash))
+            tracker = args.tracker
+            if not tracker:
+                add_list = _load_trackers_from_config()
+                tracker = add_list[0] if add_list else None
+            if not tracker:
+                _print_error("tracker nao configurado (use --tracker ou trackers.add)")
+                return
+            if tracker.startswith("udp://"):
+                tracker = "http://" + tracker[len("udp://"):]
+            if not tracker.startswith("http"):
+                _print_error("announce suporta apenas trackers HTTP/HTTPS")
+                return
+            if "/announce" not in tracker:
+                tracker = tracker.rstrip("/") + "/announce"
+            peer_id = "-TF0001-" + "".join(random.choice("0123456789abcdef") for _ in range(12))
+            params = {
+                "info_hash": ih_url,
+                "peer_id": peer_id,
+                "port": str(int(args.port)),
+                "uploaded": "0",
+                "downloaded": "0",
+                "left": str(total_size),
+                "compact": "1",
+                "event": "started",
+                "numwant": "0",
+            }
+            query = "&".join(f"{k}={v}" for k, v in params.items())
+            url = f"{tracker}?{query}"
+            try:
+                import bencodepy
+            except Exception as e:
+                _print_error(f"bencodepy nao disponivel: {e}")
+                return
+            try:
+                with urllib.request.urlopen(url, timeout=15) as resp:
+                    payload = resp.read()
+            except Exception as e:
+                _print_error(f"falha ao consultar tracker: {e}")
+                return
+            try:
+                data = bencodepy.decode(payload)
+            except Exception as e:
+                _print_error(f"falha ao decodificar resposta: {e}")
+                return
+            failure = ""
+            if isinstance(data, dict):
+                failure = data.get(b"failure reason", b"") or data.get(b"failure_reason", b"")
+                if isinstance(failure, bytes):
+                    failure = failure.decode("utf-8", "ignore")
+            if failure:
+                _print_error(f"tracker falhou: {failure}")
+                return
+            interval = 0
+            complete = 0
+            incomplete = 0
+            if isinstance(data, dict):
+                interval = int(data.get(b"interval", 0) or 0)
+                complete = int(data.get(b"complete", 0) or 0)
+                incomplete = int(data.get(b"incomplete", 0) or 0)
+            if args.json:
+                _print_json(
+                    {
+                        "ok": True,
+                        "tracker": tracker,
+                        "infohash": infohash,
+                        "interval": interval,
+                        "seeders": complete,
+                        "leechers": incomplete,
+                    }
+                )
+                return
+            print(f"tracker: {tracker}")
+            print(f"infohash: {infohash}")
+            print(f"interval: {interval}")
+            print(f"seeders: {complete}")
+            print(f"leechers: {incomplete}")
             return
 
         if args.cmd == "status-all":

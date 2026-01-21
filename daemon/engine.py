@@ -452,6 +452,8 @@ class TorrentEngine:
             params["resume_data"] = resume_data
         self.handle = self.ses.add_torrent(params)
         self._apply_tracker_aliases()
+        if self._tracker_enabled:
+            self._force_reannounce_trackers(self._tracker_add)
 
         # Prioridades: começa com tudo 0
         for i in range(self.info.num_files()):
@@ -471,7 +473,9 @@ class TorrentEngine:
     # Utilidades
     # -----------------------------
     def _apply_tracker_aliases(self) -> None:
-        if not self._tracker_aliases:
+        if not self._tracker_enabled:
+            return
+        if not self._tracker_aliases and not self._tracker_add:
             return
         try:
             entries = list(self.info.trackers())
@@ -479,6 +483,13 @@ class TorrentEngine:
             return
         resolved = []
         changed = False
+        extra_urls = self._expand_tracker_urls(self._tracker_add)
+        extra_urls = self._prune_udp_when_http_present(extra_urls)
+        if extra_urls:
+            for extra in extra_urls:
+                if extra:
+                    resolved.append({"url": extra, "tier": 0})
+            changed = True
         for entry in entries:
             url = getattr(entry, "url", None)
             tier = getattr(entry, "tier", None)
@@ -489,24 +500,23 @@ class TorrentEngine:
             if url in self._tracker_aliases:
                 changed = True
                 for real in self._tracker_aliases.get(url, []):
-                    try:
-                        ae = lt.announce_entry(real)
-                        if tier is not None:
-                            ae.tier = tier
-                        resolved.append(ae)
-                    except Exception:
+                    if not real:
                         continue
+                    resolved.append({"url": real, "tier": int(tier or 0)})
                 continue
-            resolved.append(entry)
-        existing_urls = {getattr(e, "url", "") for e in resolved}
-        for extra in self._tracker_add:
-            if extra in existing_urls:
+            resolved.append({"url": url, "tier": int(tier or 0)})
+        seen = set()
+        deduped = []
+        for entry in resolved:
+            if not isinstance(entry, dict):
+                deduped.append(entry)
                 continue
-            try:
-                resolved.append(lt.announce_entry(extra))
-                changed = True
-            except Exception:
+            url = entry.get("url", "")
+            if not url or url in seen:
                 continue
+            seen.add(url)
+            deduped.append(entry)
+        resolved = deduped
         if not changed:
             return
         try:
@@ -518,10 +528,124 @@ class TorrentEngine:
             except Exception:
                 return
         try:
-            resolved_urls = [getattr(e, "url", "") for e in resolved]
+            resolved_urls = []
+            for e in resolved:
+                if isinstance(e, dict):
+                    resolved_urls.append(e.get("url", ""))
+                else:
+                    resolved_urls.append(getattr(e, "url", ""))
             print(f"[torrentfs] trackers resolvidos: {resolved_urls}")
         except Exception:
             pass
+
+    def _expand_tracker_urls(self, trackers: Optional[List[str]]) -> list[str]:
+        if not trackers:
+            return []
+        expanded: list[str] = []
+        for item in trackers:
+            if not item:
+                continue
+            if item in self._tracker_aliases:
+                expanded.extend(self._tracker_aliases[item])
+                continue
+            if item.startswith("torrentfs://"):
+                continue
+            expanded.append(item)
+        cleaned: list[str] = []
+        seen = set()
+        for url in expanded:
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            cleaned.append(url)
+        return cleaned
+
+    def _prune_udp_when_http_present(self, urls: list[str]) -> list[str]:
+        http_hosts = set()
+        for url in urls:
+            if not url.startswith("http"):
+                continue
+            parsed = urllib.parse.urlparse(url)
+            if parsed.hostname and parsed.port:
+                http_hosts.add((parsed.hostname, parsed.port))
+        if not http_hosts:
+            return urls
+        pruned: list[str] = []
+        for url in urls:
+            if url.startswith("udp://"):
+                parsed = urllib.parse.urlparse(url)
+                if parsed.hostname and parsed.port and (parsed.hostname, parsed.port) in http_hosts:
+                    continue
+            pruned.append(url)
+        return pruned
+
+    def _force_reannounce_trackers(self, trackers: Optional[List[str]]) -> None:
+        targets = set(self._expand_tracker_urls(trackers))
+        targets = set(self._prune_udp_when_http_present(list(targets)))
+        if not targets:
+            try:
+                self.handle.force_reannounce()
+            except Exception:
+                pass
+            return
+        try:
+            entries = list(self.handle.trackers())
+        except Exception:
+            entries = []
+        fallback = False
+        for idx, entry in enumerate(entries):
+            if isinstance(entry, dict):
+                url = entry.get("url", "")
+            else:
+                url = getattr(entry, "url", "")
+            if isinstance(url, bytes):
+                url = url.decode("utf-8", "ignore")
+            if url not in targets:
+                continue
+            try:
+                self.handle.force_reannounce(0, idx)
+            except Exception:
+                fallback = True
+                break
+        if fallback:
+            try:
+                self.handle.force_reannounce()
+            except Exception:
+                pass
+
+    def _promote_trackers(self, trackers: Optional[List[str]]) -> None:
+        targets = set(self._expand_tracker_urls(trackers))
+        targets = set(self._prune_udp_when_http_present(list(targets)))
+        if not targets:
+            return
+        try:
+            entries = list(self.handle.trackers())
+        except Exception:
+            return
+        promoted = []
+        seen = set()
+        for url in targets:
+            if url in seen:
+                continue
+            promoted.append({"url": url, "tier": 0})
+            seen.add(url)
+        for entry in entries:
+            if isinstance(entry, dict):
+                url = entry.get("url", "")
+                tier = entry.get("tier", 0)
+            else:
+                url = getattr(entry, "url", "")
+                tier = getattr(entry, "tier", 0)
+            if isinstance(url, bytes):
+                url = url.decode("utf-8", "ignore")
+            if not url or url in seen:
+                continue
+            promoted.append({"url": url, "tier": int(tier or 0)})
+            seen.add(url)
+        try:
+            self.handle.replace_trackers(promoted)
+        except Exception:
+            return
 
     def add_trackers(self, trackers: Optional[List[str]] = None) -> dict:
         if not self._tracker_enabled:
@@ -535,18 +659,12 @@ class TorrentEngine:
         if not trackers:
             return {"added": [], "skipped": ["no_trackers"]}
 
-        expanded = []
+        expanded = self._expand_tracker_urls(trackers)
+        expanded = self._prune_udp_when_http_present(expanded)
         skipped = []
         for item in trackers:
-            if not item:
-                continue
-            if item in self._tracker_aliases:
-                expanded.extend(self._tracker_aliases[item])
-                continue
-            if item.startswith("torrentfs://"):
+            if item and item.startswith("torrentfs://"):
                 skipped.append(item)
-                continue
-            expanded.append(item)
 
         added = []
         existing_urls = set()
@@ -565,11 +683,129 @@ class TorrentEngine:
                 msg = str(e) or type(e).__name__
                 skipped.append(f"{url} ({msg})")
         if added:
+            promoted = []
+            seen = set()
+            for url in added:
+                if not url or url in seen:
+                    continue
+                promoted.append({"url": url, "tier": 0})
+                seen.add(url)
             try:
-                self.handle.force_reannounce()
+                entries = list(self.handle.trackers())
+            except Exception:
+                entries = []
+            for entry in entries:
+                if isinstance(entry, dict):
+                    url = entry.get("url", "")
+                    tier = entry.get("tier", 0)
+                else:
+                    url = getattr(entry, "url", "")
+                    tier = getattr(entry, "tier", 0)
+                if isinstance(url, bytes):
+                    url = url.decode("utf-8", "ignore")
+                if not url or url in seen:
+                    continue
+                promoted.append({"url": url, "tier": int(tier or 0)})
+                seen.add(url)
+            promoted_urls = [entry.get("url", "") for entry in promoted if isinstance(entry, dict)]
+            promoted_urls = self._prune_udp_when_http_present(promoted_urls)
+            promoted = [{"url": url, "tier": 0 if url in added else 1} for url in promoted_urls]
+            try:
+                self.handle.replace_trackers(promoted)
             except Exception:
                 pass
+            self._promote_trackers(added)
+            self._force_reannounce_trackers(added)
         return {"added": added, "skipped": skipped}
+
+    def publish_tracker(self, trackers: Optional[List[str]] = None) -> dict:
+        if not self._tracker_enabled:
+            return {"added": [], "skipped": ["trackers_disabled"]}
+        data = self.add_trackers(trackers)
+        self._promote_trackers(trackers or self._tracker_add)
+        self._force_reannounce_trackers(trackers or self._tracker_add)
+        return data
+
+    def trackers_list(self) -> dict:
+        handle_urls: List[str] = []
+        torrent_urls: List[str] = []
+        try:
+            entries = self.handle.trackers()
+            for e in entries:
+                if isinstance(e, dict):
+                    url = e.get("url", "")
+                else:
+                    url = getattr(e, "url", "")
+                if isinstance(url, bytes):
+                    url = url.decode("utf-8", "ignore")
+                if url:
+                    handle_urls.append(url)
+        except Exception:
+            handle_urls = []
+        try:
+            torrent_urls = [t.url for t in self.info.trackers()]
+        except Exception:
+            torrent_urls = []
+        return {"handle": handle_urls, "torrent": torrent_urls}
+
+    def trackers_status(self) -> List[dict]:
+        def _to_str(value) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, (int, float, bool)):
+                return str(int(value)) if isinstance(value, bool) else str(value)
+            if hasattr(value, "total_seconds"):
+                try:
+                    return str(int(value.total_seconds()))
+                except Exception:
+                    return str(value)
+            return str(value)
+
+        out = []
+        try:
+            entries = list(self.handle.trackers())
+        except Exception:
+            return out
+        for entry in entries:
+            if isinstance(entry, dict):
+                url = entry.get("url", "")
+                tier = entry.get("tier", 0)
+                fails = entry.get("fails", 0)
+                updating = entry.get("updating", False)
+                verified = entry.get("verified", False)
+                source = entry.get("source", "")
+                next_announce = entry.get("next_announce")
+                min_announce = entry.get("min_announce")
+                last_announce = entry.get("last_announce")
+                last_error = entry.get("last_error", "")
+            else:
+                url = getattr(entry, "url", "")
+                tier = getattr(entry, "tier", 0)
+                fails = getattr(entry, "fails", 0)
+                updating = getattr(entry, "updating", False)
+                verified = getattr(entry, "verified", False)
+                source = getattr(entry, "source", "")
+                next_announce = getattr(entry, "next_announce", None)
+                min_announce = getattr(entry, "min_announce", None)
+                last_announce = getattr(entry, "last_announce", None)
+                last_error = getattr(entry, "last_error", "")
+            if isinstance(url, bytes):
+                url = url.decode("utf-8", "ignore")
+            out.append(
+                {
+                    "url": url,
+                    "tier": int(tier or 0),
+                    "fails": int(fails or 0),
+                    "updating": bool(updating),
+                    "verified": bool(verified),
+                    "source": str(source) if source is not None else "",
+                    "next_announce": _to_str(next_announce),
+                    "min_announce": _to_str(min_announce),
+                    "last_announce": _to_str(last_announce),
+                    "last_error": str(last_error) if last_error else "",
+                }
+            )
+        return out
 
 
     def _real_path(self, file_index: int) -> str:

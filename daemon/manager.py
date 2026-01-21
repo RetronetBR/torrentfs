@@ -36,6 +36,7 @@ class TorrentManager:
         self._lock = threading.RLock()
         self.engines: Dict[str, TorrentEngine] = {}
         self.by_name: Dict[str, List[str]] = {}
+        self.by_infohash: Dict[str, str] = {}
         self.prefetch_on_start = prefetch_on_start
         self.prefetch_max_files = max(0, int(prefetch_max_files))
         self.prefetch_sleep_s = max(0.0, float(prefetch_sleep_ms)) / 1000.0
@@ -54,16 +55,44 @@ class TorrentManager:
             if tid in self.engines:
                 return tid
 
-            cache_dir = os.path.join(self.cache_root, tid)
-            engine = TorrentEngine(
-                torrent_path=torrent_path,
-                cache_dir=cache_dir,
-                skip_check=self.skip_check,
-            )
+        cache_dir = os.path.join(self.cache_root, tid)
+        engine = TorrentEngine(
+            torrent_path=torrent_path,
+            cache_dir=cache_dir,
+            skip_check=self.skip_check,
+        )
+
+        infohash = ""
+        try:
+            infohash = engine.infohash().get("v1_hex", "")
+        except Exception:
+            infohash = ""
+
+        with self._lock:
+            if infohash and infohash in self.by_infohash:
+                existing = self.by_infohash[infohash]
+                try:
+                    engine.shutdown()
+                except Exception:
+                    pass
+                try:
+                    shutil.rmtree(engine.cache_dir, ignore_errors=True)
+                except Exception:
+                    pass
+                try:
+                    os.remove(torrent_path)
+                except Exception:
+                    pass
+                print(
+                    f"[torrentfs] torrent duplicado ignorado: {os.path.basename(torrent_path)} (id {existing})"
+                )
+                return existing
 
             name = engine.info.name()
             self.engines[tid] = engine
             self.by_name.setdefault(name, []).append(tid)
+            if infohash:
+                self.by_infohash[infohash] = tid
 
             if self.prefetch_on_start:
                 threading.Thread(
@@ -172,6 +201,12 @@ class TorrentManager:
                     self.by_name.pop(name, None)
                 else:
                     self.by_name[name] = ids
+            try:
+                infohash = engine.infohash().get("v1_hex", "")
+            except Exception:
+                infohash = ""
+            if infohash and self.by_infohash.get(infohash) == tid:
+                self.by_infohash.pop(infohash, None)
         try:
             engine.shutdown()
         except Exception:
@@ -195,6 +230,12 @@ class TorrentManager:
                     self.by_name.pop(name, None)
                 else:
                     self.by_name[name] = ids
+            try:
+                infohash = engine.infohash().get("v1_hex", "")
+            except Exception:
+                infohash = ""
+            if infohash and self.by_infohash.get(infohash) == tid:
+                self.by_infohash.pop(infohash, None)
         try:
             engine.shutdown()
         except Exception:

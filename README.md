@@ -265,6 +265,18 @@ torrentfs --torrent <id|name> add-tracker
 torrentfs --torrent <id|name> add-tracker --tracker udp://tracker.retronet.org:6969/announce
 ```
 
+Forcar anuncio no tracker (aplica trackers e faz reannounce):
+
+```bash
+torrentfs --torrent <id|name> publish-tracker
+```
+
+Listar trackers efetivos do torrent:
+
+```bash
+torrentfs --torrent <id|name> trackers
+```
+
 Obter infohash (v1/v2) do torrent:
 
 ```bash
