@@ -237,6 +237,20 @@ Adicionar fonte via plugin (ex.: magnet):
 torrentfs source-add "magnet:?xt=urn:btih:..."
 ```
 
+Adicionar .torrent via URL direta:
+
+```bash
+torrentfs add-url "https://exemplo.com/arquivo.torrent"
+```
+
+Aliases de nomes (para o FUSE):
+
+```bash
+torrentfs alias set <id> "Nome amigavel"
+torrentfs alias rm <id>
+torrentfs alias list
+```
+
 Adicionar fonte do archive.org (ID ou URL):
 
 ```bash
@@ -289,6 +303,12 @@ Prune cache (remove torrents sem referencia ativa):
 
 ```bash
 torrentfs prune-cache
+```
+
+Remover torrent pelo ID:
+
+```bash
+torrentfs --torrent <id> remove-torrent
 ```
 
 Dry-run:

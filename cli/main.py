@@ -130,6 +130,11 @@ def main():
     )
 
     # -----------------------------
+    # remove-torrent
+    # -----------------------------
+    sub.add_parser("remove-torrent", help="Torrent: remover torrent pelo ID")
+
+    # -----------------------------
     # add-magnet
     # -----------------------------
     p_add_magnet = sub.add_parser("add-magnet", help="Fonte: adicionar magnet e salvar .torrent")
@@ -162,6 +167,35 @@ def main():
         default=300,
         help="Timeout para baixar metadata (segundos)",
     )
+
+    # -----------------------------
+    # add-url
+    # -----------------------------
+    p_add_url = sub.add_parser("add-url", help="Fonte: baixar .torrent via URL")
+    p_add_url.add_argument("url")
+    p_add_url.add_argument(
+        "--dir",
+        default="torrents",
+        help="Diretorio onde salvar o .torrent (default: torrents)",
+    )
+    p_add_url.add_argument(
+        "--timeout",
+        type=int,
+        default=30,
+        help="Timeout para baixar .torrent (segundos)",
+    )
+
+    # -----------------------------
+    # alias
+    # -----------------------------
+    p_alias = sub.add_parser("alias", help="Alias: gerenciar nomes de torrents")
+    p_alias_sub = p_alias.add_subparsers(dest="alias_cmd")
+    p_alias_set = p_alias_sub.add_parser("set", help="Definir alias para um torrent")
+    p_alias_set.add_argument("id")
+    p_alias_set.add_argument("name")
+    p_alias_rm = p_alias_sub.add_parser("rm", help="Remover alias de um torrent")
+    p_alias_rm.add_argument("id")
+    p_alias_sub.add_parser("list", help="Listar aliases configurados")
 
     # -----------------------------
     # add-tracker
@@ -515,6 +549,39 @@ def main():
                 msg += f"\t{client}"
             print(msg)
 
+        def _aliases_path() -> str:
+            env = os.environ.get("TORRENTFS_ALIASES")
+            if env:
+                return env
+            home = os.path.expanduser("~")
+            return os.path.join(home, ".config", "torrentfs", "aliases.json")
+
+        def _load_aliases() -> dict:
+            path = _aliases_path()
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except FileNotFoundError:
+                return {}
+            except Exception:
+                return {}
+            if not isinstance(data, dict):
+                return {}
+            out = {}
+            for key, val in data.items():
+                if not isinstance(key, str) or not isinstance(val, str):
+                    continue
+                label = val.strip()
+                if label:
+                    out[key] = label
+            return out
+
+        def _save_aliases(data: dict) -> None:
+            path = _aliases_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+
         def _normalize_infohash(value: str) -> tuple[str, str]:
             val = value.strip()
             if not val:
@@ -568,6 +635,13 @@ def main():
                     out[ih] = path
             return out
 
+        def _resolve_torrent_dir(dir_hint: str) -> str:
+            base = os.path.abspath(dir_hint)
+            cwd_base = os.path.abspath(os.getcwd())
+            if os.path.basename(cwd_base) == "torrents" and os.path.basename(base) == "torrents":
+                return cwd_base
+            return base
+
         def _save_torrent_bytes(payload: bytes, out_dir: str, name_hint: str | None = None):
             torrent_dir = os.path.abspath(out_dir)
             os.makedirs(torrent_dir, exist_ok=True)
@@ -604,7 +678,13 @@ def main():
             except Exception as e:
                 _print_error(f"falha ao baixar .torrent: {e}")
                 return None
-            return _save_torrent_bytes(data, out_dir, name_hint)
+            hint = name_hint
+            if not hint:
+                try:
+                    hint = os.path.basename(urllib.parse.urlparse(url).path) or None
+                except Exception:
+                    hint = None
+            return _save_torrent_bytes(data, out_dir, hint)
 
         def _save_magnet(magnet: str, out_dir: str, timeout: int):
             if lt is None:
@@ -743,6 +823,25 @@ def main():
         # -----------------------------
         # torrents
         # -----------------------------
+        if args.cmd == "alias":
+            aliases = _load_aliases()
+            if not args.alias_cmd or args.alias_cmd == "list":
+                if args.json:
+                    _print_json({"ok": True, "aliases": aliases})
+                else:
+                    for tid, name in aliases.items():
+                        print(f"{tid}\t{name}")
+                return
+            if args.alias_cmd == "set":
+                aliases[str(args.id)] = str(args.name).strip()
+                _save_aliases(aliases)
+                _print_ok(f"alias ok: {args.id}")
+            elif args.alias_cmd == "rm":
+                aliases.pop(str(args.id), None)
+                _save_aliases(aliases)
+                _print_ok(f"alias removido: {args.id}")
+            return
+
         if args.cmd == "torrents":
             resp, _ = await rpc_call(args.socket, {"cmd": "torrents"})
             if args.json:
@@ -803,6 +902,23 @@ def main():
             print(f"cache_disk: {_fmt_bytes(disk)}")
             return
 
+        if args.cmd == "remove-torrent":
+            if not args.torrent:
+                _print_error("use --torrent <id>")
+                return
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "remove-torrent", "torrent": args.torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if resp.get("ok"):
+                _print_ok("removido")
+            else:
+                _print_error(resp.get("error", "nao removido"))
+            return
+
         if args.cmd == "prune-cache":
             resp, _ = await rpc_call(
                 args.socket,
@@ -823,11 +939,15 @@ def main():
             return
 
         if args.cmd == "add-magnet":
-            _save_magnet(args.magnet, args.dir, args.timeout)
+            _save_magnet(args.magnet, _resolve_torrent_dir(args.dir), args.timeout)
             return
 
         if args.cmd == "source-add":
-            _handle_source_add(args.uri, args.dir, args.timeout)
+            _handle_source_add(args.uri, _resolve_torrent_dir(args.dir), args.timeout)
+            return
+
+        if args.cmd == "add-url":
+            _save_torrent_url(args.url, _resolve_torrent_dir(args.dir), args.timeout, None)
             return
 
         if args.cmd == "add-tracker":

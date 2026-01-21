@@ -96,6 +96,13 @@ class TorrentFSServer:
                                 "disk_bytes": sizes["disk"],
                             },
                         )
+                    elif cmd == "remove-torrent":
+                        tid = req.get("torrent", "")
+                        removed = self.manager.remove_torrent_by_id(str(tid))
+                        await send_json(
+                            writer,
+                            {"id": req_id, "ok": bool(removed)},
+                        )
                     elif cmd == "prune-cache":
                         dry_run = bool(req.get("dry_run", False))
                         data = self.manager.prune_cache(dry_run=dry_run)
