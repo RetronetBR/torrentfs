@@ -116,6 +116,22 @@ def _resolve_tracker_add(cfg: dict) -> list[str]:
     return out
 
 
+def _resolve_list(cfg: dict, path: str) -> list[str]:
+    items = _get_cfg(cfg, path, []) or []
+    if isinstance(items, str):
+        items = [items]
+    if not isinstance(items, list):
+        return []
+    out = []
+    for item in items:
+        if not isinstance(item, str):
+            continue
+        val = item.strip()
+        if val:
+            out.append(val)
+    return out
+
+
 def _resolve_max_metadata(cfg: dict) -> int:
     max_metadata = DEFAULT_MAX_METADATA_BYTES
     mb_value = _parse_size_mb(cfg.get("max_metadata_mb"))
@@ -214,6 +230,16 @@ def get_effective_config() -> dict:
         "skip_check": bool(_get_cfg(cfg, "skip_check", False)),
         "resume_save_interval_s": int(_get_cfg(cfg, "resume.save_interval_s", 300) or 0),
         "checking_max_active": int(_get_cfg(cfg, "checking.max_active", 0) or 0),
+        "ftp": {
+            "enable": bool(_get_cfg(cfg, "ftp.enable", False)),
+            "bind": _get_cfg(cfg, "ftp.bind", "0.0.0.0"),
+            "port": int(_get_cfg(cfg, "ftp.port", 2121) or 2121),
+            "mount": _get_cfg(cfg, "ftp.mount", None),
+            "exports": _resolve_list(cfg, "ftp.exports"),
+            "auto_pin": bool(_get_cfg(cfg, "ftp.auto_pin", True)),
+            "pin_max_files": int(_get_cfg(cfg, "ftp.pin_max_files", 0) or 0),
+            "pin_depth": int(_get_cfg(cfg, "ftp.pin_depth", -1) or -1),
+        },
     }
 
 

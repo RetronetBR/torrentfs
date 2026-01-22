@@ -1,3 +1,5 @@
 bencodepy
 libtorrent
 fusepy
+argcomplete
+pyftpdlib

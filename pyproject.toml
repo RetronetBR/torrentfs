@@ -13,6 +13,8 @@ dependencies = [
   "bencodepy",
   "libtorrent",
   "fusepy",
+  "argcomplete",
+  "pyftpdlib",
 ]
 
 [project.scripts]

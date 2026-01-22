@@ -65,5 +65,15 @@
       "end_min_mb": 1,
       "end_max_mb": 16
     }
+  },
+  "ftp": {
+    "enable": false,
+    "bind": "0.0.0.0",
+    "port": 2121,
+    "mount": null,
+    "exports": [],
+    "auto_pin": true,
+    "pin_max_files": 0,
+    "pin_depth": -1
   }
 }

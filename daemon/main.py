@@ -5,6 +5,7 @@ import sys
 
 from daemon.manager import TorrentManager
 from daemon.engine import get_effective_config
+from daemon.ftp_server import start_ftp_server
 from daemon.watcher import TorrentDirWatcher
 from daemon.server import run_server
 
@@ -40,6 +41,28 @@ def main():
         action="store_true",
         help="Pula verificacao de hash ao carregar torrents (mais rapido, menos seguro)",
     )
+    ftp_group = ap.add_mutually_exclusive_group()
+    ftp_group.add_argument(
+        "--ftp",
+        action="store_true",
+        help="Habilita servidor FTP read-only",
+    )
+    ftp_group.add_argument(
+        "--no-ftp",
+        action="store_true",
+        help="Desabilita servidor FTP",
+    )
+    ap.add_argument("--ftp-bind", help="Bind do FTP (ex.: 0.0.0.0)")
+    ap.add_argument("--ftp-port", type=int, help="Porta do FTP (ex.: 2121)")
+    ap.add_argument("--ftp-mount", help="Mount root do FUSE para exports")
+    ap.add_argument(
+        "--ftp-export",
+        action="append",
+        help="Exporta um caminho do FUSE (pode repetir)",
+    )
+    ap.add_argument("--ftp-no-pin", action="store_true", help="Nao auto-pin exports do FTP")
+    ap.add_argument("--ftp-pin-max-files", type=int, help="Max files para auto-pin do FTP")
+    ap.add_argument("--ftp-pin-depth", type=int, help="Profundidade de auto-pin do FTP")
 
     args = ap.parse_args()
 
@@ -67,6 +90,25 @@ def main():
     prefetch_max_dirs = int(cfg.get("prefetch_max_dirs", 0))
     prefetch_max_bytes = int(cfg.get("prefetch_max_bytes", 0))
     checking_max_active = int(cfg.get("checking_max_active", 0))
+    ftp_cfg = dict(cfg.get("ftp", {}) or {})
+    if args.ftp:
+        ftp_cfg["enable"] = True
+    elif args.no_ftp:
+        ftp_cfg["enable"] = False
+    if args.ftp_bind:
+        ftp_cfg["bind"] = args.ftp_bind
+    if args.ftp_port:
+        ftp_cfg["port"] = args.ftp_port
+    if args.ftp_mount:
+        ftp_cfg["mount"] = args.ftp_mount
+    if args.ftp_export:
+        ftp_cfg["exports"] = args.ftp_export
+    if args.ftp_no_pin:
+        ftp_cfg["auto_pin"] = False
+    if args.ftp_pin_max_files is not None:
+        ftp_cfg["pin_max_files"] = args.ftp_pin_max_files
+    if args.ftp_pin_depth is not None:
+        ftp_cfg["pin_depth"] = args.ftp_pin_depth
     manager = TorrentManager(
         args.cache,
         prefetch_on_start=prefetch_on_start,
@@ -102,6 +144,8 @@ def main():
             manager=manager,
         )
         watcher.start()
+
+    start_ftp_server(manager, {"ftp": ftp_cfg})
 
     # -----------------------------
     # Sobe o servidor RPC

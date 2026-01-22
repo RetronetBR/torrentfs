@@ -171,6 +171,16 @@ Arquivo (ordem de prioridade):
       "end_min_mb": 1,
       "end_max_mb": 16
     }
+  },
+  "ftp": {
+    "enable": false,
+    "bind": "0.0.0.0",
+    "port": 2121,
+    "mount": null,
+    "exports": [],
+    "auto_pin": true,
+    "pin_max_files": 0,
+    "pin_depth": -1
   }
 }
 ```
@@ -182,6 +192,40 @@ desative em `trackers.enable` e remova os trackers em `trackers.add`.
 Tambem pode apontar outro arquivo via `TORRENTFSD_CONFIG`.
 Em desenvolvimento, use `TORRENTFSD_CONFIG` para evitar que o daemon leia
 `/etc/torrentfs/torrentfsd.json`.
+
+## FTP (read-only)
+
+O TorrentFS pode expor o mount FUSE via FTP anonimo (somente leitura).
+Para evitar erros em clientes FTP, os diretórios exportados podem ser
+auto-pinados no momento em que o servidor sobe.
+
+Config (exemplo):
+
+```json
+{
+  "ftp": {
+    "enable": true,
+    "bind": "0.0.0.0",
+    "port": 2121,
+    "mount": "/mnt/torrentfs",
+    "exports": [
+      "/mnt/torrentfs/Archive.org",
+      "/mnt/torrentfs/Datassette"
+    ],
+    "auto_pin": true,
+    "pin_max_files": 0,
+    "pin_depth": -1
+  }
+}
+```
+
+Override via CLI (daemon):
+
+```bash
+torrentfsd --torrent-dir ~/torrentfs/torrents --cache ~/torrentfs/cache \
+  --ftp --ftp-mount /mnt/torrentfs --ftp-export /mnt/torrentfs/Archive.org \
+  --ftp-export /mnt/torrentfs/Datassette --ftp-port 2121
+```
 
 ## Instalacao (pipx)
 
@@ -218,6 +262,15 @@ Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se e
 Opcional: use `--mount` para permitir paths do filesystem (ex.: `/mnt/torrentfs/...`) em comandos com `path`.
 Opcional: use `--json` para forcar saida em JSON.
 Opcional: em modo desenvolvimento, use `python -m cli.main` no lugar de `torrentfs`.
+Autocomplete (argcomplete):
+
+```bash
+# bash/zsh (uma vez por usuario)
+activate-global-python-argcomplete --user
+
+# ou apenas para esta sessao
+eval "$(register-python-argcomplete torrentfs)"
+```
 
 List loaded torrents:
 

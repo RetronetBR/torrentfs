@@ -38,6 +38,7 @@ class TorrentManager:
         self.by_name: Dict[str, List[str]] = {}
         self.by_infohash: Dict[str, str] = {}
         self._pending_pins: Dict[str, dict] = {}
+        self._pending_export_pins: Dict[str, List[dict]] = {}
         self.prefetch_on_start = prefetch_on_start
         self.prefetch_max_files = max(0, int(prefetch_max_files))
         self.prefetch_sleep_s = max(0.0, float(prefetch_sleep_ms)) / 1000.0
@@ -95,6 +96,7 @@ class TorrentManager:
             if infohash:
                 self.by_infohash[infohash] = tid
             self._apply_pending_pin(torrent_path, engine)
+            self._apply_pending_exports(engine)
 
             if self.prefetch_on_start:
                 threading.Thread(
@@ -292,6 +294,16 @@ class TorrentManager:
             daemon=True,
         ).start()
 
+    def _start_pin_path_thread(self, engine: TorrentEngine, payload: dict) -> None:
+        max_files = int(payload.get("max_files", 0))
+        max_depth = int(payload.get("max_depth", -1))
+        base_path = str(payload.get("path", "") or "")
+        threading.Thread(
+            target=self._pin_path_engine,
+            args=(engine, base_path, max_files, max_depth),
+            daemon=True,
+        ).start()
+
     def _pin_all_engine(self, engine: TorrentEngine, max_files: int, max_depth: int) -> None:
         pinned = 0
         errors = 0
@@ -324,6 +336,98 @@ class TorrentManager:
         print(
             f"[torrentfs] pin agendado concluido: {engine.info.name()} pinned={pinned} errors={errors}"
         )
+
+    def _pin_path_engine(self, engine: TorrentEngine, base_path: str, max_files: int, max_depth: int) -> None:
+        pinned = 0
+        errors = 0
+
+        def _walk(path: str, depth: int) -> None:
+            nonlocal pinned, errors
+            if max_files > 0 and pinned >= max_files:
+                return
+            try:
+                entries = engine.index.list_dir(path)
+            except Exception:
+                errors += 1
+                return
+            for entry in entries:
+                if max_files > 0 and pinned >= max_files:
+                    return
+                name = entry.get("name", "")
+                if not name:
+                    continue
+                etype = entry.get("type", "")
+                child = os.path.join(path, name) if path else name
+                if etype == "dir":
+                    if max_depth >= 0 and depth >= max_depth:
+                        continue
+                    _walk(child, depth + 1)
+                else:
+                    try:
+                        engine.pin(child)
+                        pinned += 1
+                    except Exception:
+                        errors += 1
+
+        _walk(base_path, 0)
+        print(
+            f"[torrentfs] pin export concluido: {engine.info.name()} path={base_path} pinned={pinned} errors={errors}"
+        )
+
+    def _apply_pending_exports(self, engine: TorrentEngine) -> None:
+        name = engine.info.name()
+        with self._lock:
+            payloads = self._pending_export_pins.pop(name, [])
+        for payload in payloads:
+            self._start_pin_path_thread(engine, payload)
+
+    def enqueue_export_pins(
+        self,
+        exports: List[str],
+        mount_root: Optional[str],
+        max_files: int = 0,
+        max_depth: int = -1,
+    ) -> None:
+        if not exports:
+            return
+        mount_root_abs = os.path.abspath(mount_root) if mount_root else None
+        with self._lock:
+            engines = list(self.engines.values())
+            names = {eng.info.name() for eng in engines}
+
+        for export in exports:
+            if not export:
+                continue
+            exp = os.path.abspath(export)
+            rel = None
+            name = None
+            if mount_root_abs and exp.startswith(mount_root_abs + os.sep):
+                rel = os.path.relpath(exp, mount_root_abs)
+                parts = rel.split(os.sep) if rel else []
+                if parts:
+                    name = parts[0]
+                    rel = os.path.join(*parts[1:]) if len(parts) > 1 else ""
+            if not name:
+                parts = exp.split(os.sep)
+                for idx, part in enumerate(parts):
+                    if part in names:
+                        name = part
+                        rel = os.path.join(*parts[idx + 1 :]) if idx + 1 < len(parts) else ""
+                        break
+            if not name:
+                print(f"[torrentfs] export ignorado (nao encontrado): {export}")
+                continue
+
+            payload = {"path": rel or "", "max_files": max_files, "max_depth": max_depth}
+            matched = False
+            for eng in engines:
+                if eng.info.name() == name:
+                    self._start_pin_path_thread(eng, payload)
+                    matched = True
+                    break
+            if not matched:
+                with self._lock:
+                    self._pending_export_pins.setdefault(name, []).append(payload)
 
     def _walk_files(self, engine: TorrentEngine, path: str = "", dir_count: Optional[List[int]] = None) -> Iterable[str]:
         if dir_count is None:

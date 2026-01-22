@@ -11,6 +11,12 @@ import binascii
 import urllib.parse
 import urllib.request
 import random
+from typing import List
+
+try:
+    import argcomplete  # type: ignore
+except Exception:
+    argcomplete = None
 
 try:
     import libtorrent as lt
@@ -37,6 +43,60 @@ def _find_config_path() -> str:
     if os.path.exists(SYSTEM_CONFIG_PATH):
         return SYSTEM_CONFIG_PATH
     return DEFAULT_CONFIG_PATH
+
+
+def _complete_torrent_ids(prefix, parsed_args, **kwargs) -> List[str]:
+    sockets: List[str] = []
+    sock_arg = getattr(parsed_args, "socket", None)
+    if isinstance(sock_arg, list):
+        sockets.extend([s for s in sock_arg if isinstance(s, str)])
+    elif isinstance(sock_arg, str):
+        sockets.append(sock_arg)
+    sockets.append(_default_socket_path())
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        sockets.append(os.path.join(runtime_dir, "torrentfsd.sock"))
+    sockets.append("/tmp/torrentfsd.sock")
+    seen = set()
+    candidates = []
+    for s in sockets:
+        if s and s not in seen:
+            seen.add(s)
+            candidates.append(s)
+
+    async def _fetch(sock: str):
+        try:
+            resp, _ = await asyncio.wait_for(rpc_call(sock, {"cmd": "torrents"}), 0.3)
+        except Exception:
+            return []
+        if not resp.get("ok"):
+            return []
+        items = resp.get("torrents", [])
+        out = []
+        for item in items:
+            tid = str(item.get("id", "")).strip()
+            name = str(item.get("name", "")).strip()
+            if not tid:
+                continue
+            label = tid
+            if name:
+                safe = re.sub(r"\s+", "_", name)
+                safe = re.sub(r"[:]+", "-", safe)
+                label = f"{tid}:{safe}"
+            out.append(label)
+        return out
+
+    results: List[str] = []
+    for sock in candidates:
+        try:
+            results = asyncio.run(_fetch(sock))
+        except Exception:
+            results = []
+        if results:
+            break
+    if prefix:
+        results = [r for r in results if r.startswith(prefix)]
+    return results
 
 
 def _load_trackers_from_config() -> list[str]:
@@ -104,6 +164,17 @@ def _normalize_path(path: str) -> str:
         return ""
     return path.replace(os.sep, "/")
 
+def _normalize_torrent_arg(value: str) -> str:
+    if not value:
+        return value
+    if ":" in value:
+        head = value.split(":", 1)[0]
+        if re.fullmatch(r"[0-9a-fA-F]{12}", head):
+            return head.lower()
+    return value
+
+
+
 def _default_socket_path() -> str:
     env = os.environ.get("TORRENTFSD_SOCKET")
     if env:
@@ -119,7 +190,8 @@ def _default_socket_path() -> str:
 def main():
     ap = argparse.ArgumentParser("torrentfs")
     ap.add_argument("--socket", default=_default_socket_path())
-    ap.add_argument("--torrent", help="Nome ou ID do torrent")
+    p_torrent = ap.add_argument("--torrent", help="Nome ou ID do torrent")
+    p_torrent.completer = _complete_torrent_ids
     ap.add_argument(
         "--mount",
         help="Mountpoint do FUSE para resolver paths do filesystem",
@@ -742,7 +814,14 @@ def main():
         help="Profundidade maxima de diretórios (0 = só o path, -1 = ilimitado)",
     )
 
+    if argcomplete is not None:
+        try:
+            argcomplete.autocomplete(ap)
+        except Exception:
+            pass
     args = ap.parse_args()
+    if args.torrent:
+        args.torrent = _normalize_torrent_arg(args.torrent)
     if not args.cmd and args.remove:
         args.cmd = "remove-torrent"
     if not args.cmd:
