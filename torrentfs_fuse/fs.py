@@ -47,12 +47,27 @@ def _load_fusepy():
         except Exception:
             pass
 
-    alt_paths = [p for p in sys.path if os.path.abspath(p) != repo_root]
-    spec = importlib.machinery.PathFinder.find_spec("fuse", alt_paths)
+    try:
+        for pkg_path in site.getsitepackages():
+            if pkg_path not in sys.path:
+                sys.path.append(pkg_path)
+    except Exception:
+        pass
+
+    try:
+        spec = importlib.util.find_spec("fuse")
+    except Exception:
+        spec = None
+    if spec is None or spec.loader is None:
+        alt_paths = [p for p in sys.path if os.path.abspath(p) != repo_root]
+        spec = importlib.machinery.PathFinder.find_spec("fuse", alt_paths)
     if spec is None or spec.loader is None:
         raise ImportError("Não foi possível carregar fusepy. Instale com 'pip install fusepy'.")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    mod_path = os.path.abspath(getattr(module, "__file__", ""))
+    if mod_path and os.path.abspath(os.path.join(repo_root, "fuse")) in mod_path:
+        raise ImportError("Não foi possível carregar fusepy. Instale com 'pip install fusepy'.")
     return module
 
 

@@ -21,6 +21,7 @@ dependencies = [
 torrentfs = "cli.main:main"
 torrentfsd = "daemon.main:main"
 torrentfs-fuse = "torrentfs_fuse.fs:main"
+torrentfs-ftp = "daemon.ftp_main:main"
 
 [tool.setuptools]
 packages = ["cli", "common", "daemon", "plugins", "torrentfs_fuse"]

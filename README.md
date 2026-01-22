@@ -196,8 +196,10 @@ Em desenvolvimento, use `TORRENTFSD_CONFIG` para evitar que o daemon leia
 ## FTP (read-only)
 
 O TorrentFS pode expor o mount FUSE via FTP anonimo (somente leitura).
-Para evitar erros em clientes FTP, os diretórios exportados podem ser
-auto-pinados no momento em que o servidor sobe.
+Esse FTP roda em um daemon separado (`torrentfs-ftp`) e expõe apenas
+os caminhos informados em `--export` (pode ser um path local ou dentro
+do mount FUSE). O auto-pin usa o `--mount` apenas para descobrir o
+nome do torrent quando o export vem do FUSE.
 
 Config (exemplo):
 
@@ -219,12 +221,17 @@ Config (exemplo):
 }
 ```
 
-Override via CLI (daemon):
+Override via CLI (daemon FTP):
 
 ```bash
-torrentfsd --torrent-dir ~/torrentfs/torrents --cache ~/torrentfs/cache \
-  --ftp --ftp-mount /mnt/torrentfs --ftp-export /mnt/torrentfs/Archive.org \
-  --ftp-export /mnt/torrentfs/Datassette --ftp-port 2121
+# exports diretos (paths completos)
+torrentfs-ftp --export /mnt/torrentfs/Archive.org \
+  --export /mnt/torrentfs/Datassette --port 2121
+
+# usando mount para auto-pin (exports dentro do FUSE)
+torrentfs-ftp --mount /mnt/torrentfs \
+  --export /mnt/torrentfs/Archive.org \
+  --export /mnt/torrentfs/Datassette --port 2121
 ```
 
 ## Instalacao (pipx)
@@ -256,6 +263,7 @@ Comandos no PATH quando instalado via pipx:
 - `torrentfs` (CLI)
 - `torrentfsd` (daemon)
 - `torrentfs-fuse` (FUSE)
+- `torrentfs-ftp` (FTP read-only)
 
 Opcional: use `--socket` para apontar outro socket quando houver mais de um daemon.
 Socket padrao: `$TORRENTFSD_SOCKET`, ou `$XDG_RUNTIME_DIR/torrentfsd.sock` (se existir), com fallback para `/tmp/torrentfsd.sock` se o socket nao responder.
