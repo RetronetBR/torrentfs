@@ -15,8 +15,10 @@ class TorrentDirWatcher(threading.Thread):
 
         self.seen = set()
         self.pending = {}
+        self.quarantine_dir = os.path.join(self.torrent_dir, "bad")
 
         os.makedirs(self.torrent_dir, exist_ok=True)
+        os.makedirs(self.quarantine_dir, exist_ok=True)
 
     def _is_stable(self, path: str) -> bool:
         try:
@@ -26,6 +28,11 @@ class TorrentDirWatcher(threading.Thread):
             return s1 > 0 and s1 == s2
         except OSError:
             return False
+
+    def _friendly_error(self, err: str) -> str:
+        if "bdecode" in err or "bencoded" in err:
+            return "arquivo .torrent invalido ou corrompido"
+        return err or "erro desconhecido"
 
     def run(self):
         print(f"[torrentfs] monitorando: {self.torrent_dir}")
@@ -63,7 +70,8 @@ class TorrentDirWatcher(threading.Thread):
                         print(f"[torrentfs] carregado torrent: {name}")
                     except Exception as e:
                         # mantém em pending para tentar depois (com backoff)
-                        err = str(e)
+                        err = str(e) or type(e).__name__
+                        err = self._friendly_error(err)
                         attempts = 1 if not pend else pend.get("attempts", 0) + 1
                         delay = min(60.0, self.interval * (2 ** min(attempts - 1, 5)))
                         next_try = time.time() + delay
@@ -76,6 +84,15 @@ class TorrentDirWatcher(threading.Thread):
                             "attempts": attempts,
                             "next_try": next_try,
                         }
+                        if attempts >= 3:
+                            bad_path = os.path.join(self.quarantine_dir, name)
+                            try:
+                                os.replace(path, bad_path)
+                                print(f"[torrentfs] quarentena: {name} -> {bad_path}")
+                                self.pending.pop(path, None)
+                                self.seen.discard(path)
+                            except Exception as move_err:
+                                print(f"[torrentfs] falha ao mover para quarentena: {move_err}")
 
                 removed = [p for p in self.seen if p not in current]
                 for path in removed:

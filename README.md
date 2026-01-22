@@ -225,23 +225,63 @@ List loaded torrents:
 torrentfs torrents
 ```
 
-Add magnet (salva .torrent em `torrents/`):
+Exemplos adicionais (comandos novos):
 
 ```bash
-torrentfs add-magnet "<magnet:...>"
+# Cache
+torrentfs cache size
+torrentfs cache prune --dry-run
+
+# Add + pin automatico
+torrentfs add --url "https://exemplo.com/arquivo.torrent" --pin
+torrentfs add --source "archive:sb16_20190806" --pin --pin-max-files 500
+
+# Tracker
+torrentfs --torrent <id|name> tracker list
+torrentfs --torrent <id|name> tracker publish
+torrentfs --torrent <id|name> tracker scrape
+
+# Status / reannounce global
+torrentfs status --all
+torrentfs reannounce --all
+
+# Pin/unpin
+torrentfs --torrent <id|name> pin --dir "Revistas" --max-files 200 --depth 2
+torrentfs --torrent <id|name> unpin --all --verbose
+
+# Remover e prune de dados
+torrentfs --torrent <id|name> remove
+torrentfs --torrent <id|name> prune-torrent
+
+# Pinned global
+torrentfs pinned --all
+
+# Recheck com progresso
+torrentfs --torrent <id|name> recheck --wait
+
+# Pausar/retomar
+torrentfs --torrent <id|name> stop
+torrentfs --torrent <id|name> resume
 ```
 
-Adicionar fonte via plugin (ex.: magnet):
+Add (salva .torrent em `torrents/`):
 
 ```bash
-torrentfs source-add "magnet:?xt=urn:btih:..."
+torrentfs add --magnet "<magnet:...>"
+torrentfs add --url "https://exemplo.com/arquivo.torrent"
+torrentfs add --source "archive:revistasabereletronica089fev1980"
+torrentfs add --source "https://archive.org/details/revistasabereletronica089fev1980"
 ```
 
-Adicionar .torrent via URL direta:
+Pin automatico ao adicionar:
 
 ```bash
-torrentfs add-url "https://exemplo.com/arquivo.torrent"
+torrentfs add --url "https://exemplo.com/arquivo.torrent" --pin
+torrentfs add --source "archive:revistasabereletronica089fev1980" --pin --pin-max-files 500
 ```
+
+Atalhos legados (mantidos):
+- `add-magnet`, `add-url`, `source-add`
 
 Aliases de nomes (para o FUSE):
 
@@ -251,31 +291,19 @@ torrentfs alias rm <id>
 torrentfs alias list
 ```
 
-Adicionar fonte do archive.org (ID ou URL):
+Tracker (usa `trackers.add` se nenhum `--tracker` for passado):
 
 ```bash
-torrentfs source-add "archive:revistasabereletronica089fev1980"
-torrentfs source-add "https://archive.org/details/revistasabereletronica089fev1980"
+torrentfs --torrent <id|name> tracker add
+torrentfs --torrent <id|name> tracker publish
+torrentfs --torrent <id|name> tracker list
+torrentfs --torrent <id|name> tracker status
+torrentfs --torrent <id|name> tracker scrape
+torrentfs --torrent <id|name> tracker announce --tracker http://tracker.retronet.com.br:6969/announce
 ```
 
-Adicionar tracker ao torrent (usa `trackers.add` se nenhum `--tracker` for passado):
-
-```bash
-torrentfs --torrent <id|name> add-tracker
-torrentfs --torrent <id|name> add-tracker --tracker udp://tracker.retronet.org:6969/announce
-```
-
-Forcar anuncio no tracker (aplica trackers e faz reannounce):
-
-```bash
-torrentfs --torrent <id|name> publish-tracker
-```
-
-Listar trackers efetivos do torrent:
-
-```bash
-torrentfs --torrent <id|name> trackers
-```
+Atalhos legados (mantidos):
+- `add-tracker`, `publish-tracker`, `trackers`, `tracker-scrape`, `tracker-status`, `tracker-announce`
 
 Obter infohash (v1/v2) do torrent:
 
@@ -308,25 +336,25 @@ torrentfs config
 Cache size:
 
 ```bash
-torrentfs cache-size
+torrentfs cache size
 ```
 
 Prune cache (remove torrents sem referencia ativa):
 
 ```bash
-torrentfs prune-cache
+torrentfs cache prune
 ```
 
 Remover torrent pelo ID:
 
 ```bash
-torrentfs --torrent <id> remove-torrent
+torrentfs --torrent <id> remove
 ```
 
 Dry-run:
 
 ```bash
-torrentfs prune-cache --dry-run
+torrentfs cache prune --dry-run
 ```
 
 Status:
@@ -338,7 +366,7 @@ torrentfs --torrent <id|name> status
 Status (todos os torrents):
 
 ```bash
-torrentfs status-all
+torrentfs status --all
 ```
 
 Downloads em execucao:
@@ -374,7 +402,26 @@ torrentfs --torrent <id|name> reannounce
 Forcar announce (todos os torrents):
 
 ```bash
-torrentfs reannounce-all
+torrentfs reannounce --all
+```
+
+Parar/retomar torrent (mantem no FUSE):
+
+```bash
+torrentfs --torrent <id|name> stop
+torrentfs --torrent <id|name> resume
+```
+
+Recheck (aguarda progresso):
+
+```bash
+torrentfs --torrent <id|name> recheck --wait
+```
+
+Prune dados baixados de um torrent:
+
+```bash
+torrentfs --torrent <id|name> prune-torrent
 ```
 
 Info de arquivo (pieces):
@@ -428,8 +475,8 @@ torrentfs --torrent <id|name> pin <path>
 Pin directory (recursive):
 
 ```bash
-torrentfs --torrent <id|name> pin-dir <path> --max-files 100 --depth 2
-torrentfs --torrent <id|name> pin-all --max-files 100 --depth 2
+torrentfs --torrent <id|name> pin --dir <path> --max-files 100 --depth 2
+torrentfs --torrent <id|name> pin --all --max-files 100 --depth 2
 ```
 
 Unpin file:
@@ -441,7 +488,7 @@ torrentfs --torrent <id|name> unpin <path>
 Unpin directory (recursive):
 
 ```bash
-torrentfs --torrent <id|name> unpin-dir <path> --max-files 100 --depth 2
+torrentfs --torrent <id|name> unpin --dir <path> --max-files 100 --depth 2
 ```
 
 Prefetch file or directory (recursive):
@@ -454,6 +501,7 @@ List pinned files:
 
 ```bash
 torrentfs --torrent <id|name> pinned
+torrentfs pinned --all
 ```
 ## FUSE (read-only)
 

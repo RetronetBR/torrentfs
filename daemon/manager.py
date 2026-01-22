@@ -37,6 +37,7 @@ class TorrentManager:
         self.engines: Dict[str, TorrentEngine] = {}
         self.by_name: Dict[str, List[str]] = {}
         self.by_infohash: Dict[str, str] = {}
+        self._pending_pins: Dict[str, dict] = {}
         self.prefetch_on_start = prefetch_on_start
         self.prefetch_max_files = max(0, int(prefetch_max_files))
         self.prefetch_sleep_s = max(0.0, float(prefetch_sleep_ms)) / 1000.0
@@ -93,6 +94,7 @@ class TorrentManager:
             self.by_name.setdefault(name, []).append(tid)
             if infohash:
                 self.by_infohash[infohash] = tid
+            self._apply_pending_pin(torrent_path, engine)
 
             if self.prefetch_on_start:
                 threading.Thread(
@@ -184,6 +186,20 @@ class TorrentManager:
             for tid, eng in items
         ]
 
+    def list_pins_all(self) -> List[dict]:
+        with self._lock:
+            items = list(self.engines.items())
+        out: List[dict] = []
+        for tid, eng in items:
+            try:
+                pins = eng.list_pins()
+            except Exception:
+                pins = []
+            for p in pins:
+                p["id"] = tid
+                out.append(p)
+        return out
+
     def get_config(self) -> dict:
         return get_effective_config()
 
@@ -245,6 +261,69 @@ class TorrentManager:
         except Exception:
             pass
         return True
+
+    def enqueue_pin(self, torrent_name: str, max_files: int = 0, max_depth: int = -1) -> None:
+        if not torrent_name:
+            return
+        key = os.path.basename(torrent_name)
+        payload = {"max_files": int(max_files), "max_depth": int(max_depth)}
+        with self._lock:
+            self._pending_pins[key] = payload
+            for tid, eng in self.engines.items():
+                if os.path.basename(eng.torrent_path) == key:
+                    self._start_pin_thread(eng, payload)
+                    self._pending_pins.pop(key, None)
+                    break
+
+    def _apply_pending_pin(self, torrent_path: str, engine: TorrentEngine) -> None:
+        key = os.path.basename(torrent_path)
+        payload = None
+        with self._lock:
+            payload = self._pending_pins.pop(key, None)
+        if payload:
+            self._start_pin_thread(engine, payload)
+
+    def _start_pin_thread(self, engine: TorrentEngine, payload: dict) -> None:
+        max_files = int(payload.get("max_files", 0))
+        max_depth = int(payload.get("max_depth", -1))
+        threading.Thread(
+            target=self._pin_all_engine,
+            args=(engine, max_files, max_depth),
+            daemon=True,
+        ).start()
+
+    def _pin_all_engine(self, engine: TorrentEngine, max_files: int, max_depth: int) -> None:
+        pinned = 0
+        errors = 0
+
+        def _walk(path: str, depth: int) -> None:
+            nonlocal pinned, errors
+            if max_files > 0 and pinned >= max_files:
+                return
+            entries = engine.index.list_dir(path)
+            for entry in entries:
+                if max_files > 0 and pinned >= max_files:
+                    return
+                name = entry.get("name", "")
+                if not name:
+                    continue
+                etype = entry.get("type", "")
+                child = os.path.join(path, name) if path else name
+                if etype == "dir":
+                    if max_depth >= 0 and depth >= max_depth:
+                        continue
+                    _walk(child, depth + 1)
+                else:
+                    try:
+                        engine.pin(child)
+                        pinned += 1
+                    except Exception:
+                        errors += 1
+
+        _walk("", 0)
+        print(
+            f"[torrentfs] pin agendado concluido: {engine.info.name()} pinned={pinned} errors={errors}"
+        )
 
     def _walk_files(self, engine: TorrentEngine, path: str = "", dir_count: Optional[List[int]] = None) -> Iterable[str]:
         if dir_count is None:

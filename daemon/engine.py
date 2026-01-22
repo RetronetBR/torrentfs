@@ -726,6 +726,13 @@ class TorrentEngine:
         self._force_reannounce_trackers(trackers or self._tracker_add)
         return data
 
+    def force_recheck(self) -> dict:
+        try:
+            self.handle.force_recheck()
+            return {"ok": True}
+        except Exception as e:
+            return {"ok": False, "error": str(e) or type(e).__name__}
+
     def trackers_list(self) -> dict:
         handle_urls: List[str] = []
         torrent_urls: List[str] = []
@@ -1207,7 +1214,8 @@ class TorrentEngine:
             except Exception:
                 pieces_done = int(round(float(s.progress) * pieces_total)) if pieces_total > 0 else 0
             pieces_missing = max(pieces_total - pieces_done, 0)
-            state_str = str(s.state)
+            paused = bool(getattr(s, "paused", False))
+            state_str = "paused" if paused else str(s.state)
             checking = state_str == "checking_files"
             checking_progress = float(s.progress) if checking else None
             return {
@@ -1223,6 +1231,7 @@ class TorrentEngine:
                 "download_rate": int(s.download_rate),
                 "upload_rate": int(s.upload_rate),
                 "state": state_str,
+                "paused": paused,
                 "checking": checking,
                 "checking_progress": checking_progress,
             }
@@ -1328,6 +1337,84 @@ class TorrentEngine:
                 self.handle.force_dht_announce()
             except Exception:
                 pass
+
+    def stop(self) -> dict:
+        with self._lock:
+            try:
+                self._save_resume_data()
+            except Exception:
+                pass
+            try:
+                self.handle.auto_managed(False)
+            except Exception:
+                pass
+            try:
+                self.handle.pause()
+            except Exception as e:
+                return {"ok": False, "error": str(e) or type(e).__name__}
+        return {"ok": True}
+
+    def resume(self) -> dict:
+        with self._lock:
+            try:
+                self.handle.auto_managed(True)
+            except Exception:
+                pass
+            try:
+                self.handle.resume()
+            except Exception as e:
+                return {"ok": False, "error": str(e) or type(e).__name__}
+        return {"ok": True}
+
+    def prune_data(self, keep_pins: bool = True) -> dict:
+        with self._lock:
+            try:
+                self.handle.pause()
+            except Exception:
+                pass
+
+        keep = {self._resume_path, f"{self._resume_path}.tmp"}
+        if keep_pins:
+            keep.add(self._pins_path)
+
+        removed_files = 0
+        removed_dirs = 0
+        for root, dirs, files in os.walk(self.cache_dir, topdown=False):
+            for name in files:
+                path = os.path.join(root, name)
+                if path in keep:
+                    continue
+                try:
+                    os.remove(path)
+                    removed_files += 1
+                except Exception:
+                    pass
+            for name in dirs:
+                path = os.path.join(root, name)
+                try:
+                    if not os.listdir(path):
+                        os.rmdir(path)
+                        removed_dirs += 1
+                except Exception:
+                    pass
+
+        try:
+            if os.path.exists(self._resume_path):
+                os.remove(self._resume_path)
+        except Exception:
+            pass
+        try:
+            if os.path.exists(f"{self._resume_path}.tmp"):
+                os.remove(f"{self._resume_path}.tmp")
+        except Exception:
+            pass
+
+        try:
+            self.handle.force_recheck()
+        except Exception:
+            pass
+
+        return {"ok": True, "removed_files": removed_files, "removed_dirs": removed_dirs}
 
     def shutdown(self) -> None:
         self._resume_stop.set()

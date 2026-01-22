@@ -129,6 +129,11 @@ def main():
         action="store_true",
         help="Saida em JSON (default: texto simples)",
     )
+    ap.add_argument(
+        "--remove",
+        action="store_true",
+        help="Remove o torrent informado (atalho para remove)",
+    )
 
     sub = ap.add_subparsers(dest="cmd")
 
@@ -148,14 +153,27 @@ def main():
     sub.add_parser("config", help="Daemon: mostrar configuracao efetiva")
 
     # -----------------------------
+    # cache (novo)
+    # -----------------------------
+    p_cache = sub.add_parser("cache", help="Cache: comandos agregados (size/prune)")
+    cache_sub = p_cache.add_subparsers(dest="cache_cmd")
+    cache_sub.add_parser("size", help="Cache: tamanho total do cache")
+    p_cache_prune = cache_sub.add_parser("prune", help="Cache: limpar cache sem referencia ativa")
+    p_cache_prune.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Mostra o que seria removido sem apagar",
+    )
+
+    # -----------------------------
     # cache-size
     # -----------------------------
-    sub.add_parser("cache-size", help="Cache: tamanho total do cache")
+    sub.add_parser("cache-size", help="Cache: tamanho total do cache (deprecated: use cache size)")
 
     # -----------------------------
     # prune-cache
     # -----------------------------
-    p_prune = sub.add_parser("prune-cache", help="Cache: limpar cache sem referencia ativa")
+    p_prune = sub.add_parser("prune-cache", help="Cache: limpar cache sem referencia ativa (deprecated: use cache prune)")
     p_prune.add_argument(
         "--dry-run",
         action="store_true",
@@ -165,12 +183,64 @@ def main():
     # -----------------------------
     # remove-torrent
     # -----------------------------
-    sub.add_parser("remove-torrent", help="Torrent: remover torrent pelo ID")
+    sub.add_parser("remove-torrent", help="Torrent: remover torrent pelo ID (deprecated: use remove)")
+    sub.add_parser("remove", help="Torrent: remover torrent pelo ID")
+    sub.add_parser("rm", help="Alias de remove")
+
+    # -----------------------------
+    # prune-torrent
+    # -----------------------------
+    p_prune_torrent = sub.add_parser(
+        "prune-torrent", help="Torrent: limpar dados baixados (mantem torrent)"
+    )
+    p_prune_torrent.add_argument(
+        "--keep-pins",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Mantem lista de pins (default: True)",
+    )
+
+    # -----------------------------
+    # add (novo)
+    # -----------------------------
+    p_add = sub.add_parser("add", help="Fonte: adicionar magnet/url/source")
+    add_group = p_add.add_mutually_exclusive_group(required=True)
+    add_group.add_argument("--magnet")
+    add_group.add_argument("--url")
+    add_group.add_argument("--source")
+    p_add.add_argument(
+        "--dir",
+        default="torrents",
+        help="Diretorio onde salvar o .torrent (default: torrents)",
+    )
+    p_add.add_argument(
+        "--timeout",
+        type=int,
+        default=300,
+        help="Timeout da operacao (segundos)",
+    )
+    p_add.add_argument(
+        "--pin",
+        action="store_true",
+        help="Pinar todos os arquivos apos adicionar",
+    )
+    p_add.add_argument(
+        "--pin-max-files",
+        type=int,
+        default=0,
+        help="Limite maximo de arquivos para pin (0 = sem limite)",
+    )
+    p_add.add_argument(
+        "--pin-depth",
+        type=int,
+        default=-1,
+        help="Profundidade maxima de diretorios para pin (0 = só o root, -1 = ilimitado)",
+    )
 
     # -----------------------------
     # add-magnet
     # -----------------------------
-    p_add_magnet = sub.add_parser("add-magnet", help="Fonte: adicionar magnet e salvar .torrent")
+    p_add_magnet = sub.add_parser("add-magnet", help="Fonte: adicionar magnet e salvar .torrent (deprecated: use add --magnet)")
     p_add_magnet.add_argument("magnet")
     p_add_magnet.add_argument(
         "--dir",
@@ -183,11 +253,18 @@ def main():
         default=300,
         help="Timeout para baixar metadata (segundos)",
     )
+    p_add_magnet.add_argument(
+        "--pin",
+        action="store_true",
+        help="Pinar todos os arquivos apos adicionar",
+    )
+    p_add_magnet.add_argument("--pin-max-files", type=int, default=0)
+    p_add_magnet.add_argument("--pin-depth", type=int, default=-1)
 
     # -----------------------------
     # source-add
     # -----------------------------
-    p_source = sub.add_parser("source-add", help="Fonte: adicionar via plugin")
+    p_source = sub.add_parser("source-add", help="Fonte: adicionar via plugin (deprecated: use add --source)")
     p_source.add_argument("uri")
     p_source.add_argument(
         "--dir",
@@ -200,11 +277,18 @@ def main():
         default=300,
         help="Timeout para baixar metadata (segundos)",
     )
+    p_source.add_argument(
+        "--pin",
+        action="store_true",
+        help="Pinar todos os arquivos apos adicionar",
+    )
+    p_source.add_argument("--pin-max-files", type=int, default=0)
+    p_source.add_argument("--pin-depth", type=int, default=-1)
 
     # -----------------------------
     # add-url
     # -----------------------------
-    p_add_url = sub.add_parser("add-url", help="Fonte: baixar .torrent via URL")
+    p_add_url = sub.add_parser("add-url", help="Fonte: baixar .torrent via URL (deprecated: use add --url)")
     p_add_url.add_argument("url")
     p_add_url.add_argument(
         "--dir",
@@ -217,6 +301,13 @@ def main():
         default=30,
         help="Timeout para baixar .torrent (segundos)",
     )
+    p_add_url.add_argument(
+        "--pin",
+        action="store_true",
+        help="Pinar todos os arquivos apos adicionar",
+    )
+    p_add_url.add_argument("--pin-max-files", type=int, default=0)
+    p_add_url.add_argument("--pin-depth", type=int, default=-1)
 
     # -----------------------------
     # alias
@@ -233,7 +324,7 @@ def main():
     # -----------------------------
     # add-tracker
     # -----------------------------
-    p_add_tracker = sub.add_parser("add-tracker", help="Tracker: adicionar ao torrent")
+    p_add_tracker = sub.add_parser("add-tracker", help="Tracker: adicionar ao torrent (deprecated: use tracker add)")
     p_add_tracker.add_argument(
         "--tracker",
         action="append",
@@ -244,7 +335,7 @@ def main():
     # -----------------------------
     # publish-tracker
     # -----------------------------
-    p_publish = sub.add_parser("publish-tracker", help="Tracker: forcar anuncio no tracker")
+    p_publish = sub.add_parser("publish-tracker", help="Tracker: forcar anuncio no tracker (deprecated: use tracker publish)")
     p_publish.add_argument(
         "--tracker",
         action="append",
@@ -253,14 +344,53 @@ def main():
     )
 
     # -----------------------------
+    # tracker (novo)
+    # -----------------------------
+    p_tracker = sub.add_parser("tracker", help="Tracker: comandos agregados")
+    tracker_sub = p_tracker.add_subparsers(dest="tracker_cmd")
+    tracker_sub.add_parser("list", help="Tracker: listar trackers efetivos do torrent")
+    tracker_sub.add_parser("status", help="Tracker: status dos trackers do torrent")
+    p_tracker_scrape = tracker_sub.add_parser("scrape", help="Tracker: consultar scrape por infohash")
+    p_tracker_scrape.add_argument("infohash", nargs="?")
+    p_tracker_scrape.add_argument("--tracker")
+    p_tracker_announce = tracker_sub.add_parser("announce", help="Tracker: teste de announce via HTTP")
+    p_tracker_announce.add_argument("--tracker")
+    p_tracker_announce.add_argument("--port", type=int, default=6881)
+    p_tracker_add = tracker_sub.add_parser("add", help="Tracker: adicionar ao torrent")
+    p_tracker_add.add_argument("--tracker", action="append", default=[])
+    p_tracker_publish = tracker_sub.add_parser("publish", help="Tracker: forcar anuncio no tracker")
+    p_tracker_publish.add_argument("--tracker", action="append", default=[])
+
+    # -----------------------------
+    # recheck
+    # -----------------------------
+    p_recheck = sub.add_parser("recheck", help="Torrent: forcar verificacao de dados no cache")
+    p_recheck.add_argument(
+        "--wait",
+        action="store_true",
+        help="Acompanhar progresso ate finalizar",
+    )
+    p_recheck.add_argument(
+        "--interval",
+        type=float,
+        default=1.0,
+        help="Intervalo de atualizacao (segundos)",
+    )
+
+    # -----------------------------
     # trackers
     # -----------------------------
-    sub.add_parser("trackers", help="Tracker: listar trackers efetivos do torrent")
+    sub.add_parser("trackers", help="Tracker: listar trackers efetivos do torrent (deprecated: use tracker list)")
 
     # -----------------------------
     # status
     # -----------------------------
     p_status = sub.add_parser("status", help="Torrent: status do torrent selecionado")
+    p_status.add_argument(
+        "--all",
+        action="store_true",
+        help="Mostra resumo global de todos os torrents",
+    )
     p_status.add_argument("--unit", choices=["bytes", "kb", "mb", "gb"], default="bytes")
     p_status.add_argument(
         "--human",
@@ -272,7 +402,7 @@ def main():
     # -----------------------------
     # status-all
     # -----------------------------
-    p_status_all = sub.add_parser("status-all", help="Torrent: resumo global de todos os torrents")
+    p_status_all = sub.add_parser("status-all", help="Torrent: resumo global de todos os torrents (deprecated: use status --all)")
     p_status_all.add_argument("--unit", choices=["bytes", "kb", "mb", "gb"], default="bytes")
     p_status_all.add_argument(
         "--human",
@@ -310,12 +440,27 @@ def main():
     # -----------------------------
     # reannounce
     # -----------------------------
-    sub.add_parser("reannounce", help="Rede: forcar announce do tracker/DHT")
+    p_reannounce = sub.add_parser("reannounce", help="Rede: forcar announce do tracker/DHT")
+    p_reannounce.add_argument(
+        "--all",
+        action="store_true",
+        help="Forca announce em todos os torrents",
+    )
+
+    # -----------------------------
+    # stop
+    # -----------------------------
+    sub.add_parser("stop", help="Torrent: parar torrent pelo ID")
+
+    # -----------------------------
+    # resume
+    # -----------------------------
+    sub.add_parser("resume", help="Torrent: retomar torrent pelo ID")
 
     # -----------------------------
     # reannounce-all
     # -----------------------------
-    sub.add_parser("reannounce-all", help="Rede: forcar announce em todos os torrents")
+    sub.add_parser("reannounce-all", help="Rede: forcar announce em todos os torrents (deprecated: use reannounce --all)")
 
     # -----------------------------
     # file-info
@@ -342,7 +487,7 @@ def main():
     # -----------------------------
     # tracker-scrape
     # -----------------------------
-    p_scrape = sub.add_parser("tracker-scrape", help="Tracker: consultar scrape por infohash")
+    p_scrape = sub.add_parser("tracker-scrape", help="Tracker: consultar scrape por infohash (deprecated: use tracker scrape)")
     p_scrape.add_argument("infohash", nargs="?")
     p_scrape.add_argument(
         "--tracker",
@@ -352,13 +497,13 @@ def main():
     # -----------------------------
     # tracker-status
     # -----------------------------
-    sub.add_parser("tracker-status", help="Tracker: status dos trackers do torrent")
+    sub.add_parser("tracker-status", help="Tracker: status dos trackers do torrent (deprecated: use tracker status)")
 
     # -----------------------------
     # tracker-announce
     # -----------------------------
     p_announce = sub.add_parser(
-        "tracker-announce", help="Tracker: teste de announce via HTTP"
+        "tracker-announce", help="Tracker: teste de announce via HTTP (deprecated: use tracker announce)"
     )
     p_announce.add_argument(
         "--tracker",
@@ -405,7 +550,29 @@ def main():
     # pin
     # -----------------------------
     p_pin = sub.add_parser("pin", help="Pin: pinar arquivo")
-    p_pin.add_argument("path")
+    p_pin.add_argument("path", nargs="?")
+    p_pin.add_argument(
+        "--dir",
+        action="store_true",
+        help="Pinar todos os arquivos de um diretorio",
+    )
+    p_pin.add_argument(
+        "--all",
+        action="store_true",
+        help="Pinar todos os arquivos do torrent",
+    )
+    p_pin.add_argument(
+        "--max-files",
+        type=int,
+        default=0,
+        help="Limite maximo de arquivos (0 = sem limite)",
+    )
+    p_pin.add_argument(
+        "--depth",
+        type=int,
+        default=-1,
+        help="Profundidade maxima de diretórios (0 = só o path, -1 = ilimitado)",
+    )
 
     # -----------------------------
     # cp
@@ -459,7 +626,7 @@ def main():
     # -----------------------------
     # pin-dir
     # -----------------------------
-    p_pin_dir = sub.add_parser("pin-dir", help="Pin: pinar todos os arquivos de um diretorio")
+    p_pin_dir = sub.add_parser("pin-dir", help="Pin: pinar todos os arquivos de um diretorio (deprecated: use pin --dir)")
     p_pin_dir.add_argument("path")
     p_pin_dir.add_argument(
         "--max-files",
@@ -477,7 +644,7 @@ def main():
     # -----------------------------
     # pin-all
     # -----------------------------
-    p_pin_all = sub.add_parser("pin-all", help="Pin: pinar todos os arquivos do torrent")
+    p_pin_all = sub.add_parser("pin-all", help="Pin: pinar todos os arquivos do torrent (deprecated: use pin --all)")
     p_pin_all.add_argument(
         "--max-files",
         type=int,
@@ -495,12 +662,39 @@ def main():
     # unpin
     # -----------------------------
     p_unpin = sub.add_parser("unpin", help="Pin: despinar arquivo")
-    p_unpin.add_argument("path")
+    p_unpin.add_argument("path", nargs="?")
+    p_unpin.add_argument(
+        "--dir",
+        action="store_true",
+        help="Despinar todos os arquivos de um diretorio",
+    )
+    p_unpin.add_argument(
+        "--all",
+        action="store_true",
+        help="Despinar todos os arquivos do torrent",
+    )
+    p_unpin.add_argument(
+        "--max-files",
+        type=int,
+        default=0,
+        help="Limite maximo de arquivos (0 = sem limite)",
+    )
+    p_unpin.add_argument(
+        "--depth",
+        type=int,
+        default=-1,
+        help="Profundidade maxima de diretórios (0 = só o path, -1 = ilimitado)",
+    )
+    p_unpin.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Mostra arquivos sendo processados",
+    )
 
     # -----------------------------
     # unpin-dir
     # -----------------------------
-    p_unpin_dir = sub.add_parser("unpin-dir", help="Pin: despinar todos os arquivos de um diretorio")
+    p_unpin_dir = sub.add_parser("unpin-dir", help="Pin: despinar todos os arquivos de um diretorio (deprecated: use unpin --dir)")
     p_unpin_dir.add_argument("path")
     p_unpin_dir.add_argument(
         "--max-files",
@@ -514,11 +708,21 @@ def main():
         default=-1,
         help="Profundidade maxima de diretórios (0 = só o path, -1 = ilimitado)",
     )
+    p_unpin_dir.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Mostra arquivos sendo processados",
+    )
 
     # -----------------------------
     # pinned
     # -----------------------------
-    sub.add_parser("pinned", help="Pin: listar arquivos pinados")
+    p_pinned = sub.add_parser("pinned", help="Pin: listar arquivos pinados")
+    p_pinned.add_argument(
+        "--all",
+        action="store_true",
+        help="Lista pins de todos os torrents",
+    )
 
     # -----------------------------
     # prefetch
@@ -539,6 +743,8 @@ def main():
     )
 
     args = ap.parse_args()
+    if not args.cmd and args.remove:
+        args.cmd = "remove-torrent"
     if not args.cmd:
         ap.print_help()
         return
@@ -821,25 +1027,31 @@ def main():
             plugin = get_plugin_for_uri(uri)
             if not plugin:
                 _print_error("nenhum plugin encontrado para a origem")
-                return
+                return []
             try:
                 items = plugin.resolve(uri)
             except SourceError as e:
                 _print_error(str(e))
-                return
+                return []
             except Exception as e:
                 _print_error(f"falha ao resolver origem: {e}")
-                return
+                return []
             if not items:
                 _print_error("origem sem resultados")
-                return
+                return []
+            out_paths = []
             for item in items:
                 if item.kind == "magnet":
-                    _save_magnet(item.value, out_dir, timeout)
+                    out_path = _save_magnet(item.value, out_dir, timeout)
+                    if out_path:
+                        out_paths.append(out_path)
                 elif item.kind == "torrent_url":
-                    _save_torrent_url(item.value, out_dir, timeout, item.name)
+                    out_path = _save_torrent_url(item.value, out_dir, timeout, item.name)
+                    if out_path:
+                        out_paths.append(out_path)
                 else:
                     _print_error(f"tipo nao suportado: {item.kind}")
+            return out_paths
 
         def _print_status_all(resp):
             if args.json:
@@ -885,6 +1097,141 @@ def main():
                     print(f"{tid}\t{name}\tchecking={chk}\tpeers={peers}\tseeds={seeds}\tprogress={progress}")
                 else:
                     print(f"{tid}\t{name}\tpeers={peers}\tseeds={seeds}\tprogress={progress}")
+
+        async def _walk_and_apply(
+            path: str,
+            max_files: int,
+            max_depth: int,
+            apply_fn,
+            torrent_id=None,
+            on_each=None,
+        ):
+            applied = 0
+            errors = []
+            tid = torrent_id or torrent
+
+            def _join_path(parent: str, name: str) -> str:
+                if parent in ("", "/"):
+                    return name
+                return f"{parent}/{name}"
+
+            stack = [(path, 0)]
+            while stack:
+                cur, depth = stack.pop()
+                try:
+                    resp, _ = await rpc_call(
+                        args.socket,
+                        {"cmd": "list", "torrent": tid, "path": cur},
+                    )
+                    entries = resp.get("entries", []) if resp.get("ok") else []
+                except Exception as e:
+                    errors.append({"path": cur, "error": str(e)})
+                    continue
+
+                for entry in entries:
+                    if max_files > 0 and applied >= max_files:
+                        return applied, errors
+                    name = entry.get("name", "")
+                    etype = entry.get("type", "")
+                    if etype == "dir":
+                        if max_depth < 0 or depth < max_depth:
+                            stack.append((_join_path(cur, name), depth + 1))
+                    elif etype == "file":
+                        target = _join_path(cur, name)
+                        if on_each:
+                            on_each(target)
+                        resp, _ = await apply_fn(target)
+                        if resp.get("ok"):
+                            applied += 1
+                        else:
+                            errors.append({"path": target, "error": resp.get("error")})
+            return applied, errors
+
+        async def _pin_all_torrent(tid: str, max_files: int, max_depth: int):
+            async def _pin(path: str):
+                return await rpc_call(
+                    args.socket,
+                    {"cmd": "pin", "torrent": tid, "path": path},
+                )
+
+            pinned, errors = await _walk_and_apply("", max_files, max_depth, _pin, tid)
+            return pinned, errors
+
+        async def _pin_after_add(torrent_path: str, max_files: int, max_depth: int) -> bool:
+            name = os.path.basename(torrent_path)
+            try:
+                resp, _ = await rpc_call(
+                    args.socket,
+                    {
+                        "cmd": "pin-on-load",
+                        "torrent_name": name,
+                        "max_files": max_files,
+                        "max_depth": max_depth,
+                    },
+                )
+            except Exception as e:
+                _print_error(f"daemon indisponivel para pin: {e}")
+                return False
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao agendar pin"))
+                return False
+            _print_ok(f"pin agendado: {name}")
+            return True
+
+        # -----------------------------
+        # normaliza aliases/novos comandos
+        # -----------------------------
+        if args.cmd == "cache":
+            if args.cache_cmd == "size":
+                args.cmd = "cache-size"
+            elif args.cache_cmd == "prune":
+                args.cmd = "prune-cache"
+            else:
+                _print_error("use cache size|prune")
+                return
+
+        if args.cmd in {"remove", "rm"}:
+            args.cmd = "remove-torrent"
+
+        if args.cmd == "add":
+            if args.magnet:
+                args.cmd = "add-magnet"
+                args.magnet = args.magnet
+            elif args.url:
+                args.cmd = "add-url"
+                args.url = args.url
+            elif args.source:
+                args.cmd = "source-add"
+                args.uri = args.source
+            else:
+                _print_error("use --magnet, --url ou --source")
+                return
+
+        if args.cmd == "tracker":
+            if not args.tracker_cmd:
+                _print_error("use tracker list|status|scrape|announce|add|publish")
+                return
+            if args.tracker_cmd == "list":
+                args.cmd = "trackers"
+            elif args.tracker_cmd == "status":
+                args.cmd = "tracker-status"
+            elif args.tracker_cmd == "scrape":
+                args.cmd = "tracker-scrape"
+            elif args.tracker_cmd == "announce":
+                args.cmd = "tracker-announce"
+            elif args.tracker_cmd == "add":
+                args.cmd = "add-tracker"
+            elif args.tracker_cmd == "publish":
+                args.cmd = "publish-tracker"
+            else:
+                _print_error("use tracker list|status|scrape|announce|add|publish")
+                return
+
+        if args.cmd == "status" and getattr(args, "all", False):
+            args.cmd = "status-all"
+
+        if args.cmd == "reannounce" and getattr(args, "all", False):
+            args.cmd = "reannounce-all"
 
         # -----------------------------
         # torrents
@@ -999,6 +1346,28 @@ def main():
                 _print_error(resp.get("error", "nao removido"))
             return
 
+        if args.cmd == "prune-torrent":
+            torrent_id = args.torrent or await get_default_torrent(args.socket, None)
+            resp, _ = await rpc_call(
+                args.socket,
+                {
+                    "cmd": "prune-torrent",
+                    "torrent": torrent_id,
+                    "keep_pins": bool(args.keep_pins),
+                },
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao limpar torrent"))
+                return
+            removed_files = resp.get("removed_files", 0)
+            removed_dirs = resp.get("removed_dirs", 0)
+            print(f"removed_files: {removed_files}")
+            print(f"removed_dirs: {removed_dirs}")
+            return
+
         if args.cmd == "prune-cache":
             resp, _ = await rpc_call(
                 args.socket,
@@ -1019,15 +1388,22 @@ def main():
             return
 
         if args.cmd == "add-magnet":
-            _save_magnet(args.magnet, _resolve_torrent_dir(args.dir), args.timeout)
+            out_path = _save_magnet(args.magnet, _resolve_torrent_dir(args.dir), args.timeout)
+            if args.pin and out_path:
+                await _pin_after_add(out_path, int(args.pin_max_files), int(args.pin_depth))
             return
 
         if args.cmd == "source-add":
-            _handle_source_add(args.uri, _resolve_torrent_dir(args.dir), args.timeout)
+            out_path = _handle_source_add(args.uri, _resolve_torrent_dir(args.dir), args.timeout)
+            if args.pin and out_path:
+                for item in out_path:
+                    await _pin_after_add(item, int(args.pin_max_files), int(args.pin_depth))
             return
 
         if args.cmd == "add-url":
-            _save_torrent_url(args.url, _resolve_torrent_dir(args.dir), args.timeout, None)
+            out_path = _save_torrent_url(args.url, _resolve_torrent_dir(args.dir), args.timeout, None)
+            if args.pin and out_path:
+                await _pin_after_add(out_path, int(args.pin_max_files), int(args.pin_depth))
             return
 
         if args.cmd == "add-tracker":
@@ -1077,6 +1453,44 @@ def main():
                 for url in skipped:
                     print(f"  {url}")
             _print_ok("reannounce ok")
+            return
+
+        if args.cmd == "recheck":
+            torrent = args.torrent or await get_default_torrent(args.socket, None)
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "recheck", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+                return
+            if not resp.get("ok"):
+                _print_error(resp.get("error", "falha ao iniciar recheck"))
+                return
+            _print_ok("recheck iniciado")
+            if not args.wait:
+                return
+            interval = max(0.2, float(args.interval))
+            while True:
+                status_resp, _ = await rpc_call(
+                    args.socket,
+                    {"cmd": "status", "torrent": torrent},
+                )
+                if not status_resp.get("ok"):
+                    _print_error(status_resp.get("error", "falha ao obter status"))
+                    return
+                checking = status_resp.get("checking", False)
+                progress = status_resp.get("checking_progress")
+                if progress is None:
+                    progress = 0.0
+                try:
+                    pct = float(progress) * 100.0
+                except Exception:
+                    pct = 0.0
+                print(f"checking: {pct:.2f}%")
+                if not checking:
+                    return
+                time.sleep(interval)
             return
 
         if args.cmd == "trackers":
@@ -1374,77 +1788,52 @@ def main():
             _print_status_all(resp)
             return
 
+        async def _pin_all_torrent(tid: str, max_files: int, max_depth: int):
+            async def _pin(path: str):
+                return await rpc_call(
+                    args.socket,
+                    {"cmd": "pin", "torrent": tid, "path": path},
+                )
+
+            pinned, errors = await _walk_and_apply("", max_files, max_depth, _pin)
+            return pinned, errors
+
+        async def _pin_after_add(torrent_path: str, max_files: int, max_depth: int) -> bool:
+            name = os.path.basename(torrent_path)
+            deadline = time.time() + 60.0
+            while time.time() < deadline:
+                try:
+                    resp, _ = await rpc_call(args.socket, {"cmd": "torrents"})
+                except Exception:
+                    _print_error("daemon indisponivel para pin")
+                    return False
+                if resp.get("ok"):
+                    for item in resp.get("torrents", []):
+                        if item.get("torrent_name") == name:
+                            tid = item.get("id")
+                            pinned, errors = await _pin_all_torrent(
+                                tid, max_files, max_depth
+                            )
+                            _print_ok(f"pinned: {pinned} errors: {len(errors)}")
+                            for err in errors:
+                                _print_error(f"{err.get('path')}: {err.get('error')}")
+                            return True
+                await asyncio.sleep(0.5)
+            _print_error("torrent nao carregado para pin (timeout)")
+            return False
+
         # -----------------------------
         # comandos que exigem torrent
         # -----------------------------
         path_cmds = {"ls", "cat", "pin", "pin-dir", "unpin", "unpin-dir", "prefetch", "du", "file-info", "prefetch-info"}
         src_cmds = {"cp"}
         torrent = args.torrent
-        if args.cmd in path_cmds:
+        if args.cmd in path_cmds and getattr(args, "path", None) is not None:
             torrent, args.path = await _resolve_mount_path(args.path, torrent)
         if args.cmd in src_cmds:
             torrent, args.src = await _resolve_mount_path(args.src, torrent)
 
         torrent = await get_default_torrent(args.socket, torrent)
-
-        async def _walk_and_apply(path: str, max_files: int, max_depth: int, apply_fn):
-            applied = 0
-            errors = []
-
-            def _join_path(parent: str, name: str) -> str:
-                if parent in ("", "/"):
-                    return name
-                if parent.endswith("/"):
-                    return f"{parent}{name}"
-                return f"{parent}/{name}"
-
-            async def _apply_file(path: str) -> None:
-                nonlocal applied
-                if max_files > 0 and applied >= max_files:
-                    return
-                resp, _ = await apply_fn(path)
-                if resp.get("ok"):
-                    applied += 1
-                else:
-                    errors.append({"path": path, "error": resp.get("error")})
-
-            async def _walk(path: str, depth: int) -> None:
-                if max_files > 0 and applied >= max_files:
-                    return
-                resp, _ = await rpc_call(
-                    args.socket,
-                    {"cmd": "stat", "torrent": torrent, "path": path},
-                )
-                if not resp.get("ok"):
-                    errors.append({"path": path, "error": resp.get("error")})
-                    return
-
-                st = resp.get("stat", {})
-                if st.get("type") == "dir":
-                    resp, _ = await rpc_call(
-                        args.socket,
-                        {"cmd": "list", "torrent": torrent, "path": path},
-                    )
-                    if not resp.get("ok"):
-                        errors.append({"path": path, "error": resp.get("error")})
-                        return
-                    entries = resp.get("entries", [])
-                    for e in entries:
-                        if max_files > 0 and applied >= max_files:
-                            return
-                        child = _join_path(path, e.get("name", ""))
-                        if e.get("type") == "dir":
-                            if max_depth >= 0 and depth >= max_depth:
-                                continue
-                            await _walk(child, depth + 1)
-                        else:
-                            await _apply_file(child)
-                    return
-
-                await _apply_file(path)
-
-            await _walk(path, 0)
-            return applied, errors
 
         async def _walk_files(path: str, max_files: int, max_depth: int):
             files = []
@@ -1556,6 +1945,32 @@ def main():
                     _print_ok("reannounce ok")
                 else:
                     _print_error(resp.get("error", "falha ao reannounce"))
+
+        elif args.cmd == "stop":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "stop", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+            else:
+                if resp.get("ok"):
+                    _print_ok("torrent parado")
+                else:
+                    _print_error(resp.get("error", "falha ao parar torrent"))
+
+        elif args.cmd == "resume":
+            resp, _ = await rpc_call(
+                args.socket,
+                {"cmd": "resume", "torrent": torrent},
+            )
+            if args.json:
+                _print_json(resp)
+            else:
+                if resp.get("ok"):
+                    _print_ok("torrent retomado")
+                else:
+                    _print_error(resp.get("error", "falha ao retomar torrent"))
 
         elif args.cmd == "file-info":
             resp, _ = await rpc_call(
@@ -1829,21 +2244,64 @@ def main():
                 os.write(1, data)
 
         elif args.cmd == "pin":
-            resp, _ = await rpc_call(
-                args.socket,
-                {
-                    "cmd": "pin",
-                    "torrent": torrent,
-                    "path": args.path,
-                },
-            )
-            if args.json:
-                _print_json(resp)
-            else:
-                if resp.get("ok"):
-                    _print_ok("pin ok")
+            if args.all:
+                max_files = int(args.max_files)
+                max_depth = int(args.depth)
+
+                async def _pin(path: str):
+                    return await rpc_call(
+                        args.socket,
+                        {"cmd": "pin", "torrent": torrent, "path": path},
+                    )
+
+                pinned, errors = await _walk_and_apply("", max_files, max_depth, _pin)
+                out = {"ok": len(errors) == 0, "pinned": pinned, "errors": errors}
+                if args.json:
+                    _print_json(out)
                 else:
-                    _print_error(resp.get("error", "falha ao pinar"))
+                    _print_ok(f"pinned: {pinned} errors: {len(errors)}")
+                    for err in errors:
+                        _print_error(f"{err.get('path')}: {err.get('error')}")
+            elif args.dir:
+                if not args.path:
+                    _print_error("use <path> ou --all")
+                    return
+                max_files = int(args.max_files)
+                max_depth = int(args.depth)
+
+                async def _pin(path: str):
+                    return await rpc_call(
+                        args.socket,
+                        {"cmd": "pin", "torrent": torrent, "path": path},
+                    )
+
+                pinned, errors = await _walk_and_apply(args.path, max_files, max_depth, _pin)
+                out = {"ok": len(errors) == 0, "pinned": pinned, "errors": errors}
+                if args.json:
+                    _print_json(out)
+                else:
+                    _print_ok(f"pinned: {pinned} errors: {len(errors)}")
+                    for err in errors:
+                        _print_error(f"{err.get('path')}: {err.get('error')}")
+            else:
+                if not args.path:
+                    _print_error("use <path> ou --dir/--all")
+                    return
+                resp, _ = await rpc_call(
+                    args.socket,
+                    {
+                        "cmd": "pin",
+                        "torrent": torrent,
+                        "path": args.path,
+                    },
+                )
+                if args.json:
+                    _print_json(resp)
+                else:
+                    if resp.get("ok"):
+                        _print_ok("pin ok")
+                    else:
+                        _print_error(resp.get("error", "falha ao pinar"))
 
         elif args.cmd == "pin-dir":
             max_files = int(args.max_files)
@@ -1884,25 +2342,75 @@ def main():
                     _print_error(f"{err.get('path')}: {err.get('error')}")
 
         elif args.cmd == "unpin":
-            resp, _ = await rpc_call(
-                args.socket,
-                {
-                    "cmd": "unpin",
-                    "torrent": torrent,
-                    "path": args.path,
-                },
-            )
-            if args.json:
-                _print_json(resp)
-            else:
-                if resp.get("ok"):
-                    _print_ok("unpin ok")
+            if args.all:
+                max_files = int(args.max_files)
+                max_depth = int(args.depth)
+                on_each = (lambda p: print(p)) if args.verbose else None
+
+                async def _unpin(path: str):
+                    return await rpc_call(
+                        args.socket,
+                        {"cmd": "unpin", "torrent": torrent, "path": path},
+                    )
+
+                unpinned, errors = await _walk_and_apply(
+                    "", max_files, max_depth, _unpin, None, on_each
+                )
+                out = {"ok": len(errors) == 0, "unpinned": unpinned, "errors": errors}
+                if args.json:
+                    _print_json(out)
                 else:
-                    _print_error(resp.get("error", "falha ao despinar"))
+                    _print_ok(f"unpinned: {unpinned} errors: {len(errors)}")
+                    for err in errors:
+                        _print_error(f"{err.get('path')}: {err.get('error')}")
+            elif args.dir:
+                if not args.path:
+                    _print_error("use <path> ou --all")
+                    return
+                max_files = int(args.max_files)
+                max_depth = int(args.depth)
+                on_each = (lambda p: print(p)) if args.verbose else None
+
+                async def _unpin(path: str):
+                    return await rpc_call(
+                        args.socket,
+                        {"cmd": "unpin", "torrent": torrent, "path": path},
+                    )
+
+                unpinned, errors = await _walk_and_apply(
+                    args.path, max_files, max_depth, _unpin, None, on_each
+                )
+                out = {"ok": len(errors) == 0, "unpinned": unpinned, "errors": errors}
+                if args.json:
+                    _print_json(out)
+                else:
+                    _print_ok(f"unpinned: {unpinned} errors: {len(errors)}")
+                    for err in errors:
+                        _print_error(f"{err.get('path')}: {err.get('error')}")
+            else:
+                if not args.path:
+                    _print_error("use <path> ou --dir/--all")
+                    return
+                resp, _ = await rpc_call(
+                    args.socket,
+                    {
+                        "cmd": "unpin",
+                        "torrent": torrent,
+                        "path": args.path,
+                    },
+                )
+                if args.json:
+                    _print_json(resp)
+                else:
+                    if resp.get("ok"):
+                        _print_ok("unpin ok")
+                    else:
+                        _print_error(resp.get("error", "falha ao despinar"))
 
         elif args.cmd == "unpin-dir":
             max_files = int(args.max_files)
             max_depth = int(args.depth)
+            on_each = (lambda p: print(p)) if args.verbose else None
 
             async def _unpin(path: str):
                 return await rpc_call(
@@ -1910,7 +2418,9 @@ def main():
                     {"cmd": "unpin", "torrent": torrent, "path": path},
                 )
 
-            unpinned, errors = await _walk_and_apply(args.path, max_files, max_depth, _unpin)
+            unpinned, errors = await _walk_and_apply(
+                args.path, max_files, max_depth, _unpin, None, on_each
+            )
             out = {"ok": len(errors) == 0, "unpinned": unpinned, "errors": errors}
             if args.json:
                 _print_json(out)
@@ -1920,10 +2430,13 @@ def main():
                     _print_error(f"{err.get('path')}: {err.get('error')}")
 
         elif args.cmd == "pinned":
-            resp, _ = await rpc_call(
-                args.socket,
-                {"cmd": "pinned", "torrent": torrent},
-            )
+            if args.all:
+                resp, _ = await rpc_call(args.socket, {"cmd": "pinned-all"})
+            else:
+                resp, _ = await rpc_call(
+                    args.socket,
+                    {"cmd": "pinned", "torrent": torrent},
+                )
             if args.json:
                 _print_json(resp)
                 return
@@ -1935,7 +2448,13 @@ def main():
                 pct = p.get("progress_pct", 0)
                 size = p.get("size", 0)
                 path = p.get("path", "")
-                print(f"{status}\t{pct:.2f}%\t{size}\t{path}")
+                if args.all:
+                    tid = p.get("id", "")
+                    tname = p.get("torrent_name", "")
+                    label = tname or tid
+                    print(f"{label}\t{status}\t{pct:.2f}%\t{size}\t{path}")
+                else:
+                    print(f"{status}\t{pct:.2f}%\t{size}\t{path}")
 
         elif args.cmd == "prefetch":
             max_files = int(args.max_files)

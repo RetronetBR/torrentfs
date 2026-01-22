@@ -13,6 +13,14 @@ from .manager import TorrentManager
 MAX_READ_BYTES = 4 * 1024 * 1024
 
 
+async def _safe_send_json(writer: asyncio.StreamWriter, obj: dict) -> bool:
+    try:
+        await send_json(writer, obj)
+        return True
+    except (ConnectionResetError, BrokenPipeError):
+        return False
+
+
 class TorrentFSServer:
     def __init__(self, socket_path: str, manager: TorrentManager):
         self.socket_path = socket_path
@@ -47,10 +55,10 @@ class TorrentFSServer:
                             "name": "torrentfsd",
                             "torrents": self.manager.list_torrents(),
                         }
-                        await send_json(writer, resp)
+                        await _safe_send_json(writer, resp)
 
                     elif cmd == "torrents":
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -60,7 +68,7 @@ class TorrentFSServer:
                         )
                     elif cmd == "config":
                         cfg = self.manager.get_config()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -70,7 +78,7 @@ class TorrentFSServer:
                         )
                     elif cmd == "status-all":
                         data = self.manager.status_all()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -81,13 +89,13 @@ class TorrentFSServer:
                         )
                     elif cmd == "reannounce-all":
                         self.manager.reannounce_all()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True},
                         )
                     elif cmd == "cache-size":
                         sizes = self.manager.cache_size()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -99,14 +107,14 @@ class TorrentFSServer:
                     elif cmd == "remove-torrent":
                         tid = req.get("torrent", "")
                         removed = self.manager.remove_torrent_by_id(str(tid))
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": bool(removed)},
                         )
                     elif cmd == "prune-cache":
                         dry_run = bool(req.get("dry_run", False))
                         data = self.manager.prune_cache(dry_run=dry_run)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -120,7 +128,7 @@ class TorrentFSServer:
                         if max_files is not None:
                             max_files = int(max_files)
                         data = self.manager.downloads(max_files=max_files)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -130,7 +138,7 @@ class TorrentFSServer:
                         )
                     elif cmd == "peers-all":
                         data = self.manager.peers_all()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -149,18 +157,63 @@ class TorrentFSServer:
                             "ok": True,
                             "status": engine.status(),
                         }
-                        await send_json(writer, resp)
+                        await _safe_send_json(writer, resp)
 
                     elif cmd == "reannounce":
                         engine = self._get_engine_from_req(req)
                         engine.reannounce()
-                        await send_json(writer, {"id": req_id, "ok": True})
+                        await _safe_send_json(writer, {"id": req_id, "ok": True})
+
+                    elif cmd == "pin-on-load":
+                        name = str(req.get("torrent_name") or "")
+                        max_files = int(req.get("max_files", 0) or 0)
+                        max_depth = int(req.get("max_depth", -1) or -1)
+                        self.manager.enqueue_pin(name, max_files, max_depth)
+                        await _safe_send_json(writer, {"id": req_id, "ok": True})
+
+                    elif cmd == "stop":
+                        engine = self._get_engine_from_req(req)
+                        data = engine.stop()
+                        await _safe_send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": data.get("ok", False),
+                                "error": data.get("error"),
+                            },
+                        )
+
+                    elif cmd == "resume":
+                        engine = self._get_engine_from_req(req)
+                        data = engine.resume()
+                        await _safe_send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": data.get("ok", False),
+                                "error": data.get("error"),
+                            },
+                        )
+
+                    elif cmd == "prune-torrent":
+                        engine = self._get_engine_from_req(req)
+                        keep_pins = bool(req.get("keep_pins", True))
+                        data = engine.prune_data(keep_pins=keep_pins)
+                        await _safe_send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": data.get("ok", False),
+                                "removed_files": data.get("removed_files", 0),
+                                "removed_dirs": data.get("removed_dirs", 0),
+                            },
+                        )
 
                     elif cmd == "file-info":
                         engine = self._get_engine_from_req(req)
                         path = req["path"]
                         info = engine.file_info(path)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "info": info},
                         )
@@ -169,7 +222,7 @@ class TorrentFSServer:
                         engine = self._get_engine_from_req(req)
                         path = req["path"]
                         info = engine.prefetch_info(path)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "info": info},
                         )
@@ -177,7 +230,7 @@ class TorrentFSServer:
                     elif cmd == "infohash":
                         engine = self._get_engine_from_req(req)
                         info = engine.infohash()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "info": info},
                         )
@@ -185,7 +238,7 @@ class TorrentFSServer:
                     elif cmd == "torrent-info":
                         engine = self._get_engine_from_req(req)
                         info = engine.torrent_info_summary()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "info": info},
                         )
@@ -194,7 +247,7 @@ class TorrentFSServer:
                         engine = self._get_engine_from_req(req)
                         path = req.get("path", "")
                         entries = engine.list_dir(path)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "entries": entries},
                         )
@@ -203,7 +256,7 @@ class TorrentFSServer:
                         engine = self._get_engine_from_req(req)
                         path = req["path"]
                         st = engine.stat(path)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "stat": st},
                         )
@@ -212,25 +265,32 @@ class TorrentFSServer:
                         engine = self._get_engine_from_req(req)
                         path = req["path"]
                         engine.pin(path)
-                        await send_json(writer, {"id": req_id, "ok": True})
+                        await _safe_send_json(writer, {"id": req_id, "ok": True})
 
                     elif cmd == "unpin":
                         engine = self._get_engine_from_req(req)
                         path = req["path"]
                         engine.unpin(path)
-                        await send_json(writer, {"id": req_id, "ok": True})
+                        await _safe_send_json(writer, {"id": req_id, "ok": True})
 
                     elif cmd == "pinned":
                         engine = self._get_engine_from_req(req)
                         pins = engine.list_pins()
-                        await send_json(
+                        await _safe_send_json(
+                            writer,
+                            {"id": req_id, "ok": True, "pins": pins},
+                        )
+
+                    elif cmd == "pinned-all":
+                        pins = self.manager.list_pins_all()
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "pins": pins},
                         )
                     elif cmd == "peers":
                         engine = self._get_engine_from_req(req)
                         peers = engine.peers()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "peers": peers},
                         )
@@ -239,13 +299,13 @@ class TorrentFSServer:
                         engine = self._get_engine_from_req(req)
                         path = req["path"]
                         engine.prefetch(path)
-                        await send_json(writer, {"id": req_id, "ok": True})
+                        await _safe_send_json(writer, {"id": req_id, "ok": True})
 
                     elif cmd == "add-tracker":
                         engine = self._get_engine_from_req(req)
                         trackers = req.get("trackers")
                         data = engine.add_trackers(trackers)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -259,7 +319,7 @@ class TorrentFSServer:
                         engine = self._get_engine_from_req(req)
                         trackers = req.get("trackers")
                         data = engine.publish_tracker(trackers)
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -269,10 +329,22 @@ class TorrentFSServer:
                             },
                         )
 
+                    elif cmd == "recheck":
+                        engine = self._get_engine_from_req(req)
+                        data = engine.force_recheck()
+                        await _safe_send_json(
+                            writer,
+                            {
+                                "id": req_id,
+                                "ok": data.get("ok", False),
+                                "error": data.get("error"),
+                            },
+                        )
+
                     elif cmd == "trackers":
                         engine = self._get_engine_from_req(req)
                         trackers = engine.trackers_list()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "trackers": trackers},
                         )
@@ -280,7 +352,7 @@ class TorrentFSServer:
                     elif cmd == "tracker-status":
                         engine = self._get_engine_from_req(req)
                         status = engine.trackers_status()
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {"id": req_id, "ok": True, "trackers": status},
                         )
@@ -310,7 +382,7 @@ class TorrentFSServer:
                         )
 
                         # Envia cabeçalho JSON
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -323,7 +395,7 @@ class TorrentFSServer:
                             await send_bytes(writer, data)
 
                     else:
-                        await send_json(
+                        await _safe_send_json(
                             writer,
                             {
                                 "id": req_id,
@@ -338,7 +410,7 @@ class TorrentFSServer:
                         msg = "Torrent nao encontrado. Use 'torrents' para listar."
                     else:
                         msg = str(err)
-                    await send_json(
+                    await _safe_send_json(
                         writer,
                         {"id": req_id, "ok": False, "error": msg},
                     )
@@ -356,27 +428,27 @@ class TorrentFSServer:
                         msg = "Tamanho de leitura invalido."
                     else:
                         msg = err
-                    await send_json(
+                    await _safe_send_json(
                         writer,
                         {"id": req_id, "ok": False, "error": msg},
                     )
                 except FileNotFoundError:
-                    await send_json(
+                    await _safe_send_json(
                         writer,
                         {"id": req_id, "ok": False, "error": "FileNotFound"},
                     )
                 except NotADirectoryError:
-                    await send_json(
+                    await _safe_send_json(
                         writer,
                         {"id": req_id, "ok": False, "error": "NotADirectory"},
                     )
                 except IsADirectoryError:
-                    await send_json(
+                    await _safe_send_json(
                         writer,
                         {"id": req_id, "ok": False, "error": "IsADirectory"},
                     )
                 except Exception as e:
-                    await send_json(
+                    await _safe_send_json(
                         writer,
                         {
                             "id": req_id,
